@@ -507,7 +507,7 @@ def stage_observation_contents(
     object_name: str,
     observation_date: str,
 ) -> str:
-    observation_name = f"{project_code}.{object_name}.{observation_date}.asdm"
+    observation_name = "mySDM"
     destination = workdir_path / observation_name
     print(f"Copying observation directory {downloaded_dir} into {destination}")
 

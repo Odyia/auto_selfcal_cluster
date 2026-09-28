@@ -509,11 +509,22 @@ def stage_observation_contents(
 ) -> str:
     observation_name = "mySDM"
     destination = workdir_path / observation_name
-    print(f"Copying observation directory {downloaded_dir} into {destination}")
+
+    asdm_root = downloaded_dir
+    if not (asdm_root / "ASDM.xml").is_file():
+        nested_asdm_roots = sorted(path.parent for path in downloaded_dir.glob("*/ASDM.xml"))
+        if len(nested_asdm_roots) != 1:
+            raise RuntimeError(
+                f"Expected one ASDM.xml in {downloaded_dir} or one immediate child; "
+                f"found {len(nested_asdm_roots)} immediate-child ASDM datasets."
+            )
+        asdm_root = nested_asdm_roots[0]
+
+    print(f"Copying ASDM directory {asdm_root} into {destination}")
 
     if destination.exists():
         shutil.rmtree(str(destination))
-    shutil.copytree(str(downloaded_dir), str(destination), symlinks=True)
+    shutil.copytree(str(asdm_root), str(destination), symlinks=True)
     return observation_name
 
 

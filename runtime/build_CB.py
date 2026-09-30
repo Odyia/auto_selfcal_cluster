@@ -381,7 +381,7 @@ def write_auto_image_config(
         bool_keys = {"use_single_band", "try_point_source", "print_results", "write_results", "write_regions", "override_sfr_request"}
         numeric_keys = {"image_size"}
         if pattern.search(content):
-            def replacer(match: re.Match) -> str:
+            def replacer(match) -> str:
                 prefix = match.group(1)
                 if key in numeric_keys or key in bool_keys:
                     return f"{prefix}{value}"

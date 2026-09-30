@@ -96,6 +96,11 @@ After CB calibration is submitted, the pipeline will chain auto-image automatica
 ```
 python auto-calibration.py --pipeline auto-image --asc-ms-path 'path-to-directory'
 ```
+You can run auto-image from a url that has a `.ms` directory (won't run on uncalibrated data)
+```
+python auto-calibration.py --pipeline auto-image --url 'your-link-goes-here'
+```
+CB observation/SDM-BDF URLs are not valid auto-image inputs; use `--pipeline cb` to calibrate those into a measurement set first.
 To submit imaging for an existing CB workdir as a Slurm job so that you don't have to wait with the terminal open:
 ```
 python auto-calibration.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-submit

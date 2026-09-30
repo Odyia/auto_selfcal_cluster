@@ -456,6 +456,12 @@ def validate_url_for_pipeline(url: Optional[str], pipeline: str, quiet: bool = F
                 "Continuing in ASC mode and preferring .ms content."
             )
 
+    if pipeline == "auto-image" and url_type in {"cb", "mixed"}:
+        sys.exit(
+            "Error: auto-image URL mode expects an ASC-style source containing a calibrated .ms. "
+            "The provided URL looks like a CB observation tree or mixed content."
+        )
+
 
 def is_ms_dir(path: Path) -> bool:
     if not path.is_dir():
@@ -998,8 +1004,38 @@ def submit_post_job_cleanup(args: argparse.Namespace, after_job_id: str, jobname
     return submitted_ids[-1] if submitted_ids else ""
 
 
-def run_auto_image_workflow(args: argparse.Namespace) -> None:
+def stage_remote_ms_for_auto_image(args: argparse.Namespace, source_url: str):
+    args.asc_no_casa = True
+    result = run_asc_remote_workflow(args, source_url)
+    if result is None:
+        return None
+
+    workdir_matches = re.findall(r"(?m)^.*Workdir ready: (.+?)\s*$", result.stdout or "")
+    if not workdir_matches:
+        sys.exit("Error: ASC URL staging completed but did not report its workdir.")
+
+    workdir = Path(workdir_matches[-1]).expanduser().resolve()
+    ms_path = find_ms_directory(workdir)
+    if ms_path is None:
+        sys.exit(f"Error: ASC URL staging produced no measurement set in {workdir}.")
+    return workdir, ms_path
+
+
+def run_auto_image_workflow(args: argparse.Namespace, source_url: Optional[str] = None) -> None:
     script_dir = Path(__file__).resolve().parent
+
+    if source_url:
+        if args.auto_image_workdir or args.cb_workdir or args.auto_image_ms_path or args.asc_ms_path:
+            sys.exit(
+                "Error: --url cannot be combined with an auto-image workdir or local measurement-set path."
+            )
+        staged = stage_remote_ms_for_auto_image(args, source_url)
+        if staged is None:
+            return
+        workdir, ms_path = staged
+        args.auto_image_workdir = str(workdir)
+        args.auto_image_ms_path = str(ms_path)
+
     workdir_input = args.auto_image_workdir or args.cb_workdir
     ms_input = args.auto_image_ms_path or args.asc_ms_path
     auto_image_dir = None
@@ -1325,7 +1361,9 @@ def submit_dependent_asc_job(args: argparse.Namespace, cb_workdir: Path, cb_fina
     return submitted_ids[-1] if submitted_ids else ""
 
 
-def run_asc_remote_workflow(args: argparse.Namespace, source_url: str) -> None:
+def run_asc_remote_workflow(
+    args: argparse.Namespace, source_url: str
+) -> Optional[subprocess.CompletedProcess]:
     script_dir = Path(__file__).resolve().parent
     asc_script = script_dir / "runtime" / "run_build_and_prep_ASC.py"
     if not asc_script.exists():
@@ -1370,9 +1408,9 @@ def run_asc_remote_workflow(args: argparse.Namespace, source_url: str) -> None:
     if args.dry_run:
         print("ASC remote dry run enabled; the following command would be executed:")
         print(" ".join(str(arg) for arg in cmd))
-        return
+        return None
 
-    run_subprocess(cmd, cwd=script_dir, quiet=args.quiet, verbose=args.verbose)
+    return run_subprocess(cmd, cwd=script_dir, quiet=args.quiet, verbose=args.verbose)
 
 
 def main() -> None:
@@ -1428,7 +1466,15 @@ def main() -> None:
         return
 
     if pipeline == "auto-image":
-        run_auto_image_workflow(args)
+        if source_url and is_remote_url(source_url):
+            run_auto_image_workflow(args, source_url)
+        elif source_url:
+            if args.auto_image_ms_path or args.asc_ms_path:
+                sys.exit("Error: --url cannot be combined with a local auto-image measurement-set path.")
+            args.auto_image_ms_path = source_url
+            run_auto_image_workflow(args)
+        else:
+            run_auto_image_workflow(args)
         return
 
     if pipeline == "asc":

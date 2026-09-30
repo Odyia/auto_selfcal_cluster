@@ -1413,6 +1413,25 @@ def run_asc_remote_workflow(
     return run_subprocess(cmd, cwd=script_dir, quiet=args.quiet, verbose=args.verbose)
 
 
+def require_sbatch_for_submission(args: argparse.Namespace) -> None:
+    if args.dry_run:
+        return
+
+    submission_required = (
+        (args.pipeline == "cb" and args.cb_submit)
+        or (args.pipeline == "cb-asc" and not args.skip_cb)
+        or (args.pipeline == "asc" and not args.asc_skip_submit and not args.asc_dry_run)
+        or (args.pipeline == "auto-image" and args.auto_image_submit)
+    )
+    if submission_required and shutil.which("sbatch") is None:
+        sys.exit(
+            "Error: this workflow will submit Slurm jobs, but 'sbatch' is not available on PATH. "
+            "Run from an NRAO Slurm-enabled node/allocation (follow the cluster instructions to "
+            "connect to nmpost-master and request an interactive node with nodescheduler), then "
+            "verify with 'command -v sbatch'."
+        )
+
+
 def main() -> None:
     args = normalize_cli_inputs(parse_args())
     pipeline = args.pipeline
@@ -1426,6 +1445,8 @@ def main() -> None:
 
     if args.skip_cb and not args.cb_workdir:
         sys.exit("Error: --skip-cb requires --cb-workdir.")
+
+    require_sbatch_for_submission(args)
 
     if source_url and is_remote_url(source_url):
         validate_url_for_pipeline(source_url, pipeline, quiet=args.quiet)

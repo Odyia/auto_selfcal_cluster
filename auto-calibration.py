@@ -121,6 +121,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--allow-url-type-mismatch",
+        "--auto-image-allow-cb-url",
+        dest="allow_url_type_mismatch",
+        action="store_true",
+        help=(
+            "Continue when remote URL scanning reports a source type that does not match the selected pipeline. "
+            "The legacy --auto-image-allow-cb-url name is also accepted."
+        ),
+    )
+    parser.add_argument(
         "--auto-image-source-name",
         help="Source name to write into auto-image-VLA/config.yaml, overriding metadata inference during bootstrap.",
     )
@@ -225,6 +235,8 @@ def normalize_boolean_flag_values(inputs):
         "--cb-submit": True,
         "--cb-asc-wait-for-cb": True,
         "--auto-image-submit": True,
+        "--allow-url-type-mismatch": True,
+        "--auto-image-allow-cb-url": True,
         "--asc-use-single-band": True,
         "--asc-use-single-freq": True,
         "--a-config": True,
@@ -422,31 +434,52 @@ def add_slurm_mail_args(command: list, mail_config: Optional[Tuple[Optional[str]
     return command
 
 
-def validate_url_for_pipeline(url: Optional[str], pipeline: str, quiet: bool = False) -> None:
+def validate_url_for_pipeline(
+    url: Optional[str],
+    pipeline: str,
+    quiet: bool = False,
+    allow_url_type_mismatch: bool = False,
+) -> None:
     if not url or not is_remote_url(url):
         return
 
-    url_type = probe_remote_url_type(url)
+    try:
+        if pipeline == "auto-image":
+            url_type = probe_remote_url_type(url, max_depth=12, max_dirs=1200)
+        else:
+            url_type = probe_remote_url_type(url)
+    except Exception as exc:
+        if not allow_url_type_mismatch:
+            raise
+        if not quiet:
+            print(
+                "Warning: remote URL type scan failed; bypassing it because "
+                f"--allow-url-type-mismatch was provided ({exc})."
+            )
+        return
     if not quiet:
         print(f"URL probe result: {url_type}")
 
-    if pipeline in {"cb", "cb-asc"} and url_type == "asc":
+    if pipeline in {"cb", "cb-asc"} and url_type == "asc" and not allow_url_type_mismatch:
         sys.exit(
             "Error: The provided URL looks like an ASC-style source (contains .ms directories), "
-            "but CB/CB-ASC mode expects a CB archive/tree source (observation directories)."
+            "but CB/CB-ASC mode expects a CB archive/tree source (observation directories). "
+            "Use --allow-url-type-mismatch to bypass this scanner check."
         )
 
-    if pipeline in {"cb", "cb-asc"} and url_type == "mixed":
+    if pipeline in {"cb", "cb-asc"} and url_type == "mixed" and not allow_url_type_mismatch:
         sys.exit(
             "Error: The provided URL appears mixed (contains both observation-style and .ms-style content). "
             "CB/CB-ASC mode requires a CB-only source. Point to the specific CB observation dataset or "
-            "switch to --pipeline asc if you intend to process an ASC .ms source."
+            "switch to --pipeline asc if you intend to process an ASC .ms source, or use "
+            "--allow-url-type-mismatch to bypass this scanner check."
         )
 
-    if pipeline == "asc" and url_type == "cb":
+    if pipeline == "asc" and url_type == "cb" and not allow_url_type_mismatch:
         sys.exit(
             "Error: The provided URL looks like a CB-style source (observation directories), "
-            "but ASC mode expects an ASC-style source with .ms content."
+            "but ASC mode expects an ASC-style source with .ms content. "
+            "Use --allow-url-type-mismatch to bypass this scanner check."
         )
 
     if pipeline == "asc" and url_type == "mixed":
@@ -456,11 +489,15 @@ def validate_url_for_pipeline(url: Optional[str], pipeline: str, quiet: bool = F
                 "Continuing in ASC mode and preferring .ms content."
             )
 
-    if pipeline == "auto-image" and url_type in {"cb", "mixed"}:
+    if pipeline == "auto-image" and url_type == "cb" and not allow_url_type_mismatch:
         sys.exit(
             "Error: auto-image URL mode expects an ASC-style source containing a calibrated .ms. "
-            "The provided URL looks like a CB observation tree or mixed content."
+            "The provided URL looks like a CB observation tree. If it contains a calibrated .ms, "
+            "retry with --allow-url-type-mismatch."
         )
+
+    if allow_url_type_mismatch and url_type in {"cb", "asc", "mixed"} and not quiet:
+        print("Warning: bypassing remote URL type validation; the selected pipeline still requires compatible data.")
 
 
 def is_ms_dir(path: Path) -> bool:
@@ -1449,7 +1486,12 @@ def main() -> None:
     require_sbatch_for_submission(args)
 
     if source_url and is_remote_url(source_url):
-        validate_url_for_pipeline(source_url, pipeline, quiet=args.quiet)
+        validate_url_for_pipeline(
+            source_url,
+            pipeline,
+            quiet=args.quiet,
+            allow_url_type_mismatch=args.allow_url_type_mismatch,
+        )
 
     if pipeline == "cb":
         cb_workdir, cb_final_job_id = run_cb_workflow(args)

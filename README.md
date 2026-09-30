@@ -80,6 +80,8 @@ For CB:
 ```
 python auto-calibration.py --pipeline cb --url 'your-link-goes-here'
 ```
+If the dataset is missidentified as a ASC and rather than CB/SDM-BDF then you can override this check with `--allow-url-type-mismatch`. This only applies for url inputs. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
+
 
 If your SDM-BDF source is local:
 ```
@@ -90,7 +92,6 @@ Only use --skip-cb if you already have a prepared CB working directory and want 
 ```
 python auto-calibration.py --pipeline cb --cb-workdir 'path-to-directory' --skip-cb
 ```
-
 #### Running auto-image
 After CB calibration is submitted, the pipeline will chain auto-image automatically. Depending on the size you set (default is 512px) it can take awhile to run. You can change the image size with `--auto-image-size`, since this is the most likly reason for rerunning auto-image. I suggest running the SLURM job version since the image is likely to be large and could take a while. You can also run auto-image manually on an existing .ms path without SLURM:
 ```
@@ -100,7 +101,8 @@ You can run auto-image from a url that has a `.ms` directory (won't run on uncal
 ```
 python auto-calibration.py --pipeline auto-image --url 'your-link-goes-here'
 ```
-CB observation/SDM-BDF URLs are not valid auto-image inputs; use `--pipeline cb` to calibrate those into a measurement set first.
+CB observation/SDM-BDF URLs are not valid auto-image inputs; use `--pipeline cb` to calibrate those into a measurement set first. If URL scanning misclassifies a source or fails for any pipeline, retry with `--allow-url-type-mismatch`. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
+
 To submit imaging for an existing CB workdir as a Slurm job so that you don't have to wait with the terminal open:
 ```
 python auto-calibration.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-submit
@@ -117,6 +119,7 @@ If it is ASC on A-config, use --a-config. This adjusts L/S band resources to red
 ```
 python auto-calibration.py --pipeline asc --url 'your-link-goes-here' --a-config
 ```
+If the dataset is missidentified as a CB/SDM-BDF and rather than ASC then you can override this check with `--allow-url-type-mismatch`. This only applies for url inputs. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
 
 If you already ran CB and now want ASC, point to the directory instead of giving a URL. This also works for running ASC on any local .ms:
 ```
@@ -128,6 +131,8 @@ You can chain CB then ASC on the same dataset. Supply an SDM-BDF source link (or
 ```
 python auto-calibration.py --pipeline cb-asc --url 'your-link-goes-here'
 ```
+If the dataset is missidentified as a ASC and rather than CB/SDM-BDF then you can override this check with `--allow-url-type-mismatch`. This only applies for url inputs. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
+
 
 ## In Progress (Check status)
 This builds a working directory named:
@@ -200,6 +205,9 @@ Pipeline mode: cb, asc, cb-asc, or auto-image
 
 `--url`
 Source URL/path; pipeline-specific behavior is inferred from --pipeline
+
+`--allow-url-type-mismatch`
+Continue when remote URL scanning reports a source type that does not match the selected pipeline.
 
 `--dry-run`
 Dry-run the combined workflow and print CB/ASC commands instead of executing them

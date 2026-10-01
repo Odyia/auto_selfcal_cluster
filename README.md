@@ -62,7 +62,7 @@ Make sure you are logged in with your NRAO account so you can access your data. 
 - CB expects SDM-BDF style source data
 - ASC expects a calibrated Measurement Set source (.ms), that can also be created locally by running the CB pipeline
 
-NRAO will process your request and email you a link to the directory.
+NRAO will process your request and email you a link to the directory. This link to the directory is the url that you'll use to run commands
 
 # Running auto-calibration
 After requesting data and receiving the link, you can run auto-calibration.
@@ -93,17 +93,21 @@ Only use --skip-cb if you already have a prepared CB working directory and want 
 python auto-calibration.py --pipeline cb --cb-workdir 'path-to-directory' --skip-cb
 ```
 #### Running auto-image
-After CB calibration is submitted, the pipeline will chain auto-image automatically. Depending on the size you set (default is 512px) it can take awhile to run. You can change the image size with `--auto-image-size`, since this is the most likly reason for rerunning auto-image. I suggest running the SLURM job version since the image is likely to be large and could take a while. You can also run auto-image manually on an existing .ms path without SLURM:
+After CB calibration is submitted, the pipeline will chain auto-image automatically. Depending on the size you set (default is 512px) it can take awhile to run. You can change the image size with `--auto-image-size`. This can be done during the CB pipeline when you are doing initial calibration or when running the auto-image pipeline, since this is the most likely reason for rerunning auto-image. I suggest running the SLURM job version since the image is likely to be large and could take a while, with `--auto-image-submit` but you need to be on a sbatch compute node for it to be submitted. You can also run auto-image manually on an existing .ms path without SLURM:
 ```
 python auto-calibration.py --pipeline auto-image --asc-ms-path 'path-to-directory'
 ```
-You can run auto-image from a url that has a `.ms` directory (won't run on uncalibrated data)
+You can run auto-image from a url that has a `.ms` directory (won't run on uncalibrated data), this will create a ASC directory then run auto-image on it.
 ```
 python auto-calibration.py --pipeline auto-image --url 'your-link-goes-here'
 ```
-CB observation/SDM-BDF URLs are not valid auto-image inputs; use `--pipeline cb` to calibrate those into a measurement set first. If URL scanning misclassifies a source or fails for any pipeline, retry with `--allow-url-type-mismatch`. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
+CB observation/SDM-BDF URLs are not valid auto-image inputs; use `--pipeline cb` to calibrate those into a measurement set first. If URL scanning misclassifies a source or fails for any pipeline, retry with `--allow-url-type-mismatch`. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`).
 
-To submit imaging for an existing CB workdir as a Slurm job so that you don't have to wait with the terminal open:
+Add `--auto-image-submit` to submit imaging through Slurm. For standalone URL or local-MS runs, the wrapper creates `run_auto_image.sh` in the generated workdir; existing CB workdirs reuse their script or get one generated if missing:
+```
+python auto-calibration.py --pipeline auto-image --url 'your-link-goes-here' --auto-image-submit
+```
+For an existing CB workdir:
 ```
 python auto-calibration.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-submit
 ```

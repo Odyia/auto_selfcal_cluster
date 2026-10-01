@@ -1058,6 +1058,60 @@ def stage_remote_ms_for_auto_image(args: argparse.Namespace, source_url: str):
     return workdir, ms_path
 
 
+def write_auto_image_submit_script(workdir: Path, auto_image_dir: Path, casa_executable: str) -> Path:
+    workdir = workdir.resolve()
+    auto_image_dir = auto_image_dir.resolve()
+    job_name = f"AutoImage-{workdir.name}"
+    output_path = workdir / f"{job_name}.out"
+    error_path = workdir / f"{job_name}.err"
+    mail_type, mail_user = load_slurm_mail_config()
+
+    header_lines = [
+        "#!/bin/bash",
+        "#SBATCH --export=ALL",
+        f"#SBATCH --job-name={job_name}",
+        f"#SBATCH --output={output_path}",
+        f"#SBATCH --error={error_path}",
+        f"#SBATCH --chdir={shlex.quote(str(auto_image_dir))}",
+        "#SBATCH --time=7-00:00:00",
+        "#SBATCH --mem=128GB",
+        "#SBATCH --nodes=1",
+        "#SBATCH --ntasks-per-node=1",
+        "#SBATCH --cpus-per-task=1",
+    ]
+    if mail_type:
+        header_lines.append(f"#SBATCH --mail-type={mail_type}")
+    if mail_user:
+        header_lines.append(f"#SBATCH --mail-user={mail_user}")
+
+    install_code = (
+        "import subprocess,sys;"
+        "print(f'Installing pandas into CASA Python: {sys.executable}');"
+        "subprocess.run([sys.executable,'-m','pip','install','--user','pandas'],check=True)"
+    )
+    run_code = (
+        "import os,sys;"
+        "_user_site=os.path.expanduser(f'~/.local/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages');"
+        "sys.path.insert(0,_user_site) if _user_site not in sys.path else None;"
+        "from casatasks import listobs,tclean,imfit,imstat,imhead;"
+        "import runpy;runpy.run_path('run-auto-image.py', init_globals=globals(), run_name='__main__')"
+    )
+    commands = [
+        f"{shlex.quote(casa_executable)} --nogui -c {shlex.quote(install_code)}",
+        f"{shlex.quote(casa_executable)} --nogui -c {shlex.quote(run_code)}",
+    ]
+    body_lines = ["", "set -euo pipefail", ""]
+    for command in commands:
+        body_lines.extend([f"echo {shlex.quote('Running: ' + command)}", command, ""])
+    body_lines.append('echo "Auto-image job complete"')
+
+    script_path = workdir / "run_auto_image.sh"
+    script_path.write_text("\n".join(header_lines + body_lines) + "\n", encoding="utf-8")
+    script_path.chmod(0o755)
+    print(f"Created auto-image SLURM job script: {script_path}")
+    return script_path
+
+
 def run_auto_image_workflow(args: argparse.Namespace, source_url: Optional[str] = None) -> None:
     script_dir = Path(__file__).resolve().parent
 
@@ -1118,12 +1172,18 @@ def run_auto_image_workflow(args: argparse.Namespace, source_url: Optional[str] 
     update_auto_image_size(config_path, args.auto_image_size)
     auto_image_script = auto_image_dir / "run-auto-image.py"
 
+    if not auto_image_script.exists():
+        sys.exit(f"Error: auto-image script not found: {auto_image_script}")
+    if not config_path.exists():
+        sys.exit(f"Error: auto-image config not found: {config_path}")
+
     if args.auto_image_submit:
         submit_script = workdir / "run_auto_image.sh"
         if not submit_script.exists():
-            sys.exit(
-                f"Error: expected auto-image submit script not found: {submit_script}. "
-                "Generate it via CB prep first, or run direct mode without --auto-image-submit."
+            submit_script = write_auto_image_submit_script(
+                workdir,
+                auto_image_dir,
+                args.auto_image_casa_executable,
             )
 
         cmd = add_slurm_mail_args(["sbatch", str(submit_script)])
@@ -1135,11 +1195,6 @@ def run_auto_image_workflow(args: argparse.Namespace, source_url: Optional[str] 
         run_subprocess(cmd, cwd=workdir, quiet=args.quiet, verbose=args.verbose)
         print("Standalone auto-image sbatch submission completed.")
         return
-
-    if not auto_image_script.exists():
-        sys.exit(f"Error: auto-image script not found: {auto_image_script}")
-    if not config_path.exists():
-        sys.exit(f"Error: auto-image config not found: {config_path}")
 
     measurement_set = None
     try:

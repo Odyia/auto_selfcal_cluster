@@ -294,16 +294,6 @@ def download_directory(
             print()
 
         completed += 1
-        percent = min(idx / total * 100, 100)
-        if quiet:
-            if idx == total or idx % 10 == 0:
-                print(f"Directory progress: {percent:5.1f}% ({idx}/{total} files)")
-        else:
-            if inline_progress:
-                print(f"\rDirectory progress: {percent:5.1f}% ({idx}/{total} files)", end="", flush=True)
-            else:
-                if idx == total or idx % 10 == 0:
-                    print(f"Directory progress: {percent:5.1f}% ({idx}/{total} files)")
 
     if quiet:
         print(f"Directory download complete ({completed}/{total} files).")

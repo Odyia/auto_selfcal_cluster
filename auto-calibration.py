@@ -1301,6 +1301,7 @@ def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
         cmd.extend(["--url", cb_url or ""])
     cmd.extend(["--cb", args.cb_template])
     cmd.extend(["--auto-image-vla", args.cb_auto_image_vla])
+    cmd.extend(["--auto-image-size", str(args.auto_image_size)])
     if args.verbose:
         cmd.append("--verbose")
     if args.quiet:

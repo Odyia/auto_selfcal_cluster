@@ -778,7 +778,7 @@ cleanup_job_content = f"""#!/bin/bash
 #SBATCH --ntasks-per-node=2                   # Request 2 cores
 
 echo "about to run clean_up_post_selfcal.py"
-xvfb-run -d /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/mpicasa /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/casa --nogui -c "import os,sys,subprocess; user_site=os.path.expanduser('~/.local/lib/python%s.%s/site-packages' % (sys.version_info[0],sys.version_info[1])); sys.path.insert(0,user_site); subprocess.run([sys.executable,'-m','pip','install','--user','pandas'],check=True); sys.path.insert(0,user_site); sys.argv=['clean_up_post_selfcal.py']; execfile('clean_up_post_selfcal.py')"
+xvfb-run -d /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/mpicasa /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/casa --nogui -c "import os,sys,subprocess,runpy; user_site=os.path.expanduser('~/.local/lib/python%s.%s/site-packages' % (sys.version_info[0],sys.version_info[1])); sys.path.insert(0,user_site); subprocess.run([sys.executable,'-m','pip','install','--user','pandas'],check=True); sys.path.insert(0,user_site); sys.argv=['clean_up_post_selfcal.py']; runpy.run_path('clean_up_post_selfcal.py', init_globals=globals(), run_name='__main__')"
 """
 
 with open(cleanup_job_script, "w") as f:

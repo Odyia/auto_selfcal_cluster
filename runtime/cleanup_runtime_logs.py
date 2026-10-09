@@ -92,17 +92,18 @@ def main() -> None:
             if move_if_exists(path, run_slurm_dir / path.name):
                 moved += 1
 
-    # Move generated product trees from the matching workdir into the grouped log bundle.
+    # Move generated pipeline trees from the matching workdir into the grouped log bundle.
     matching_workdirs = sorted(project_root.glob(f"{safe_slug(args.jobname)}"))
     if not matching_workdirs and args.jobname:
         matching_workdirs = sorted(project_root.glob(f"{args.jobname}"))
     for workdir in matching_workdirs:
         if not workdir.is_dir():
             continue
-        products_dir = workdir / "products"
-        if products_dir.exists() and products_dir.is_dir():
-            if move_if_exists(products_dir, run_group / "products"):
-                moved += 1
+        for directory_name in ("build", "products"):
+            artifact_dir = workdir / directory_name
+            if artifact_dir.exists() and artifact_dir.is_dir():
+                if move_if_exists(artifact_dir, run_group / directory_name):
+                    moved += 1
 
     print(f"Created log group: {run_group}")
     print(f"Moved {moved} artifact(s).")

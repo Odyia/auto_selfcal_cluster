@@ -24,7 +24,7 @@ def _load_point_source_fitters():
 
 def discover_final_image_paths(final_files_directory: Path):
     image_paths = sorted(final_files_directory.rglob("*.image.tt0"))
-    return [p for p in image_paths if p.is_file()]
+    return [p for p in image_paths if p.is_dir() or p.is_file()]
 
 
 def create_imfitresults_csv(final_files_directory: Path):

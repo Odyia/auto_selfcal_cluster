@@ -92,7 +92,7 @@ Only use --skip-cb if you already have a prepared CB working directory and want 
 ```
 python auto-calibration.py --pipeline cb --cb-workdir 'path-to-directory' --skip-cb
 ```
-#### Running auto-image
+### Running auto-image
 After CB calibration is submitted, the pipeline will chain auto-image automatically. Depending on the size you set (default is 512px) it can take awhile to run. You can change the image size with `--auto-image-size`. This can be done during the CB pipeline when you are doing initial calibration or when running the auto-image pipeline, since this is the most likely reason for rerunning auto-image. I suggest running the SLURM job version since the image is likely to be large and could take a while, with `--auto-image-submit` but you need to be on a sbatch compute node for it to be submitted. You can also run auto-image manually on an existing .ms path without SLURM:
 ```
 python auto-calibration.py --pipeline auto-image --asc-ms-path 'path-to-directory'

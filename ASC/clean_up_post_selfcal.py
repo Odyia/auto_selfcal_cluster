@@ -22,17 +22,12 @@ def _load_point_source_fitters():
     return fit_point_source_basic
 
 
-def discover_final_image_paths(final_files_directory: Path):
-    image_paths = sorted(final_files_directory.rglob("*.image.tt0"))
-    return [p for p in image_paths if p.is_dir() or p.is_file()]
-
-
-def create_imfitresults_csv(final_files_directory: Path):
+def create_imfitresults_csv(final_files_directory: Path, image_paths):
     """Fit a point source at the center of each collected image and save the results to final_files."""
     final_files_directory = Path(final_files_directory)
-    image_paths = discover_final_image_paths(final_files_directory)
+    image_paths = sorted(Path(path) for path in image_paths if Path(path).exists())
     if not image_paths:
-        print(f"No final image products found under {final_files_directory}; skipping point-source fit summary.")
+        print(f"No copied final image products were supplied from {final_files_directory}; skipping point-source fit summary.")
         return None
 
     fit_point_source_basic = _load_point_source_fitters()
@@ -145,6 +140,7 @@ final_files_directory = f"{root_dir}/final_files"
 os.makedirs(final_files_directory, exist_ok=True)
 
 list_of_mses = []
+collected_final_image_paths = []
 for i in range(len(frequencies)):
 
     freq = frequencies[i]
@@ -176,6 +172,8 @@ for i in range(len(frequencies)):
             shutil.copy2(ff, destination)
         elif ff.is_dir():
             copy_tree_compat(ff, destination)
+        if ff.name.endswith(".image.tt0") and (destination.is_dir() or destination.is_file()):
+            collected_final_image_paths.append(destination.resolve())
     print("Done")
 
     # apply calibrations to each measurement set
@@ -209,5 +207,8 @@ if concat_final_ms:
         shutil.move(str(source_file), str(destination_dir / source_file.name))
         print(f"Moved final self_cal ms to final_files directory")
 
-# after collecting the final products, generate the imfit CSV summary from the final image set
-create_imfitresults_csv(Path(final_files_directory))
+# Fit the exact tt0 images copied into final_files, after all frequency folders are collected.
+print(f"Collected {len(collected_final_image_paths)} final images for imfit:")
+for image_path in collected_final_image_paths:
+    print(f"  {image_path}")
+create_imfitresults_csv(Path(final_files_directory), collected_final_image_paths)

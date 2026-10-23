@@ -1,23 +1,86 @@
 import argparse
 import shutil
 import os
-import sys
 from pathlib import Path
 import re
 import pandas as pd
+from datetime import datetime
 
 
 def _load_point_source_fitters():
-    """Import the fit helper functions used by auto-image-VLA."""
-    auto_image_dir = Path(__file__).resolve().parents[1] / "repo" / "auto-image-VLA"
-    helper_path = auto_image_dir / "helper_functions.py"
-    if not helper_path.exists():
-        raise FileNotFoundError(
-            "Could not find repo/auto-image-VLA/helper_functions.py; point-source fitting requires the auto-image-VLA repo."
+    """Load CASA-only point-source fitting tasks for the final image products."""
+    from casatasks import imfit, imhead, imstat
+
+    def fit_point_source_basic(image_path, print_results=False, write_results=False):
+        image_path = str(image_path)
+        head = imhead(image_path, mode="list")
+        target = head["object"]
+        telescope = head["telescope"]
+        if telescope == "EVLA":
+            telescope = "VLA"
+
+        freq = head["crval4"]
+        if head["cunit4"] == "Hz":
+            freq = round(freq / 1e9, 2)
+
+        obs_date = head["date-obs"]
+        dt = datetime.strptime(obs_date, "%Y/%m/%d/%H:%M:%S.%f")
+        obs_date_formatted = dt.strftime("%m/%d/%Y")
+
+        x0, y0 = head["shape"][0] / 2, head["shape"][1] / 2
+        bmaj = head["beammajor"]["value"]
+        bmin = head["beamminor"]["value"]
+        bpa = head["beampa"]["value"]
+        estimates_path = Path("estimates.txt")
+        with estimates_path.open("w") as estimates_file:
+            estimates_file.write(
+                f"3e-4, {x0}, {y0}, {bmaj} arcsec, {bmin} arcsec, {bpa} deg, abp"
+            )
+
+        scale = 2.5
+        region_fit = (
+            f"ellipse[[{x0}pix, {y0}pix], "
+            f"[{scale * bmaj / 2}arcsec, {scale * bmin / 2}arcsec], {bpa}deg]"
         )
-    if str(auto_image_dir) not in sys.path:
-        sys.path.insert(0, str(auto_image_dir))
-    from helper_functions import fit_point_source_basic
+        try:
+            try:
+                fit = imfit(imagename=image_path, region=region_fit, estimates=str(estimates_path))
+                flux_det = fit["results"]["component0"]["flux"]["value"][0]
+                flux_err_det = fit["results"]["component0"]["flux"]["error"][0]
+            except Exception as exc:
+                print(f"Imfit failed for {image_path}: {exc}")
+                flux_det = 0
+                flux_err_det = 0
+
+            region_rms = (
+                f"ellipse[[{x0}pix, {y0}pix], "
+                f"[{scale * bmaj / 2}arcsec, {scale * bmin / 2}arcsec], {bpa}deg]"
+            )
+            rms_result = imstat(image_path, region=region_rms)
+            flux_nondet = 3 * rms_result["rms"][0]
+        finally:
+            if estimates_path.exists():
+                estimates_path.unlink()
+
+        results = {
+            "Target": target,
+            "Telescope": telescope,
+            "Program": None,
+            "Observation Date": obs_date_formatted,
+            "dT [days]": None,
+            "Freq [GHz]": freq,
+            "Flux Det [mJy]": round(1000 * flux_det, 3),
+            "Flux_err Det [mJy]": round(1000 * flux_err_det, 3),
+            "Detection": None,
+            "Reducer": None,
+            "Upper Limit Nondet [mJy]": round(1000 * flux_nondet, 3),
+            "Error Nondet [mJy]": 0,
+        }
+
+        if print_results:
+            print(results)
+
+        return results
 
     return fit_point_source_basic
 

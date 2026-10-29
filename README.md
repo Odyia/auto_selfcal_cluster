@@ -1,5 +1,5 @@
 # RUNNING INITIAL CALIBRATION OR AUTO SELF-CALIBRATION
-Many of the initial Auto-Selfcal scripts are forked from the work done by Jimmy Lynch (https://github.com/jlynch2195/auto_selfcal_cluster), and this repo also uses his auto-image-VLA (https://github.com/jlynch2195/auto-image-VLA) as a submodule. As Jimmy mentions in his README, this also uses the auto_selfcal code developed by Patrick Sheehan and his team (https://github.com/psheehan/auto_selfcal), so full credit goes to them for the basis of the ASC pipeline of this project. Unlike Jimmy's original project, Patrick Sheehan's work is installed here as a submodule, so no extra installation step is needed. This project also makes use of the CASA calibration pipeline script supplied by NRAO.
+Many of the initial Auto-Selfcal scripts are forked from the work done by Jimmy Lynch (https://github.com/jlynch2195/auto_selfcal_cluster), and this repo uses our auto-image-VLA fork (https://github.com/Odyia/auto-image-VLA) as a submodule. The fork is based on Jimmy's original auto-image-VLA (https://github.com/jlynch2195/auto-image-VLA). As Jimmy mentions in his README, this also uses the auto_selfcal code developed by Patrick Sheehan and his team (https://github.com/psheehan/auto_selfcal), so full credit goes to them for the basis of the ASC pipeline of this project. Unlike Jimmy's original project, Patrick Sheehan's work is installed here as a submodule, so no extra installation step is needed. This project also makes use of the CASA calibration pipeline script supplied by NRAO.
 
 This repo is set up as an automation wrapper around their code, with the use case of the NRAO cluster and Talapas specifically in mind.
 
@@ -111,6 +111,11 @@ For an existing CB workdir:
 ```
 python auto-calibration.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-submit
 ```
+Add `--auto-image-select` to inspect the available Measurement Set or SDM-BDF metadata and interactively choose image products before running or submitting. The menu lists only bands/frequency groups present in the dataset and respects `--auto-image-split`; select one or more numbered products, or `all`. For CB, the selection is stored in the generated auto-image config before the calibration jobs are submitted, so the later Slurm auto-image job does not need an interactive terminal. For standalone auto-image, the wrapper checks the Measurement Set before launching CASA or submitting its Slurm job.
+```
+python auto-calibration.py --pipeline cb --url 'your-link-goes-here' --auto-image-select
+python auto-calibration.py --pipeline auto-image --asc-ms-path 'path-to-directory' --auto-image-select --auto-image-submit
+```
 All images will be put in a folder in the given CB/ASC directory called images and then sorted by the size of the image. Whenever you run auto-image it'll also generate an imfitresults.csv for the set on images generated. That can be found in the imfitresults folder along side the images folder.
 
 ### Running ASC
@@ -173,6 +178,18 @@ scp -r nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/auto_sel
 ```
 
 The first path is where the data is on the cluster, and the second path is where you want it locally.
+Do keep in mind if you're using WSL for connecting to the cluster with windows. Since that is just a Linux virtual machine the files that are moved will be store within that virtual machine rather than within your windows directories.
+
+#### Mass pull off Cluster
+If you need to pull lots of images with different resolutions across different directories or if you just want to retain the cluster file structure without having to set it up yourself for your personal storage.
+We can make use of rsync which has more more going on than scp. It can resume a stopped job if interupted, and be used to sync file structures.
+```
+rsync -avz --include='CB.*/' --include='CB.*/images/***' --include='CB.*/imfit_results/***' --exclude='*' nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/auto_selfcal_cluster/ /where/you/want/it
+```
+```
+rsync -avz --include='ASC.*/' --include='ASC.*/images/***' --include='ASC.*/final_files/***' --exclude='*' nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/auto_selfcal_cluster/ /where/you/want/it
+```
+This command assumes that you just have the repo in the main directory of your node. But it will pull all the sperate CB directories image and imfit directoies while keeping them organized like how they are in the cluster.
 
 ## Logs
 Before/after runs, metadata snapshots and Slurm .out/.err artifacts are moved/grouped under logs. If something breaks or crashes, check those files first. The scripts are set up to throw useful setup/runtime errors, but they will not catch everything. You can use the flag -v when running to turn on verbose logging, if you need to get more out of the logs.
@@ -286,6 +303,9 @@ Source name to write into auto-image-VLA/config.yaml, overwrites metadata-scrape
 type = int,
 default = 512,
 image_size value written to auto-image-VLA/config.yaml
+
+`--auto-image-select`
+Inspect input metadata and interactively select available bands/frequency groups before imaging. This works for CB and standalone auto-image runs.
 
 `--auto-image-split`
 default = "both",

@@ -16,6 +16,8 @@ import urllib.request
 from pathlib import Path
 from typing import Optional, Tuple
 
+from runtime.auto_image_selection import prompt_for_image_options
+
 
 
 def parse_args():
@@ -141,6 +143,14 @@ def parse_args():
         help="image_size written to auto-image-VLA/config.yaml during bootstrap (default: 512).",
     )
     parser.add_argument(
+        "--auto-image-select",
+        action="store_true",
+        help=(
+            "Inspect dataset metadata and interactively select available bands/frequency groups to image. "
+            "Works with CB and standalone auto-image pipelines."
+        ),
+    )
+    parser.add_argument(
         "--auto-image-split",
         type=str,
         default="both",
@@ -235,6 +245,7 @@ def normalize_boolean_flag_values(inputs):
         "--cb-submit": True,
         "--cb-asc-wait-for-cb": True,
         "--auto-image-submit": True,
+        "--auto-image-select": True,
         "--allow-url-type-mismatch": True,
         "--auto-image-allow-cb-url": True,
         "--asc-use-single-band": True,
@@ -651,6 +662,30 @@ def update_auto_image_size(config_path: Path, image_size: int) -> None:
     print(f"Updated auto-image size in config: {image_size}")
 
 
+def update_auto_image_selection(config_path: Path, selected_images: list) -> None:
+    text = config_path.read_text(encoding="utf-8")
+    serialized = json.dumps(selected_images)
+    updated_text, replacements = re.subn(
+        r"^(\s*selected_images\s*:\s*).*$",
+        lambda match: f"{match.group(1)}{serialized}",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if replacements == 0:
+        updated_text = text.rstrip() + f"\nselected_images: {serialized}\n"
+    config_path.write_text(updated_text, encoding="utf-8")
+    print(f"Updated auto-image band/frequency selection in config: {config_path}")
+
+
+def read_auto_image_config_value(config_path: Path, key: str, default: str) -> str:
+    pattern = re.compile(rf"^\s*{re.escape(key)}\s*:\s*(.*?)\s*$", re.MULTILINE)
+    match = pattern.search(config_path.read_text(encoding="utf-8"))
+    if not match:
+        return default
+    return match.group(1).strip().strip('"').strip("'")
+
+
 def patch_auto_image_output_directory(auto_image_dir: Path) -> None:
     helper_path = auto_image_dir / "helper_functions.py"
     run_path = auto_image_dir / "run-auto-image.py"
@@ -717,6 +752,49 @@ def read_auto_image_source_name(args: argparse.Namespace, script_dir: Path, ms_p
     if not source_name:
         sys.exit("Error: ASC metadata scraper returned no object_name for the measurement set.")
     return source_name
+
+
+def read_auto_image_image_options(
+    script_dir: Path,
+    ms_path: Path,
+    split: str,
+    use_single_band: bool,
+    single_band: str,
+) -> list:
+    metadata_script = script_dir / "runtime" / "metadata-scraper-ASC.py"
+    if not metadata_script.exists():
+        sys.exit(f"Error: ASC metadata scraper not found: {metadata_script}")
+
+    command = [
+        sys.executable,
+        str(metadata_script),
+        str(ms_path),
+        "--output-format",
+        "json",
+        "--include-image-options",
+        "--split",
+        split,
+    ]
+    if use_single_band:
+        command.extend(["--use-single-band", "--single-band", single_band])
+    result = subprocess.run(
+        command,
+        cwd=script_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"return code {result.returncode}"
+        sys.exit(f"Error: ASC metadata scraper could not inspect auto-image bands/frequencies: {detail}")
+
+    try:
+        metadata = json.loads(result.stdout)
+    except ValueError as exc:
+        sys.exit(f"Error: invalid output from ASC metadata scraper: {exc}")
+
+    return metadata.get("image_options", [])
 
 
 def bootstrap_auto_image_workdir(
@@ -1177,6 +1255,47 @@ def run_auto_image_workflow(args: argparse.Namespace, source_url: Optional[str] 
     if not config_path.exists():
         sys.exit(f"Error: auto-image config not found: {config_path}")
 
+    measurement_set = None
+    for line in config_path.read_text(encoding="utf-8").splitlines():
+        if line.strip().startswith("measurement_set:"):
+            _, raw_value = line.split(":", 1)
+            measurement_set = raw_value.strip().strip('"').strip("'")
+            break
+
+    if args.auto_image_select and not args.dry_run:
+        if not measurement_set:
+            sys.exit(f"Error: auto-image config has no measurement_set: {config_path}")
+        ms_path = Path(measurement_set).expanduser()
+        if not ms_path.is_absolute():
+            ms_path = (auto_image_dir / ms_path).resolve()
+        if not ms_path.exists():
+            sys.exit(f"Error: measurement set for auto-image selection was not found: {ms_path}")
+        configured_split = read_auto_image_config_value(
+            config_path,
+            "split",
+            args.auto_image_split,
+        )
+        configured_single_band = read_auto_image_config_value(
+            config_path,
+            "single_band",
+            "EVLA_C",
+        )
+        configured_use_single_band = read_auto_image_config_value(
+            config_path,
+            "use_single_band",
+            "False",
+        ).lower() in {"true", "yes", "1"}
+        selected_images = prompt_for_image_options(
+            read_auto_image_image_options(
+                script_dir,
+                ms_path,
+                configured_split,
+                configured_use_single_band,
+                configured_single_band,
+            )
+        )
+        update_auto_image_selection(config_path, selected_images)
+
     if args.auto_image_submit:
         submit_script = workdir / "run_auto_image.sh"
         if not submit_script.exists():
@@ -1195,16 +1314,6 @@ def run_auto_image_workflow(args: argparse.Namespace, source_url: Optional[str] 
         run_subprocess(cmd, cwd=workdir, quiet=args.quiet, verbose=args.verbose)
         print("Standalone auto-image sbatch submission completed.")
         return
-
-    measurement_set = None
-    try:
-        for line in config_path.read_text(encoding="utf-8").splitlines():
-            if line.strip().startswith("measurement_set:"):
-                _, raw_value = line.split(":", 1)
-                measurement_set = raw_value.strip().strip('"').strip("'")
-                break
-    except Exception:
-        measurement_set = None
 
     if measurement_set:
         ms_path = Path(measurement_set).expanduser()
@@ -1302,6 +1411,9 @@ def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
     cmd.extend(["--cb", args.cb_template])
     cmd.extend(["--auto-image-vla", args.cb_auto_image_vla])
     cmd.extend(["--auto-image-size", str(args.auto_image_size)])
+    cmd.extend(["--auto-image-split", args.auto_image_split])
+    if args.auto_image_select:
+        cmd.append("--auto-image-select")
     if args.verbose:
         cmd.append("--verbose")
     if args.quiet:

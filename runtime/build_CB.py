@@ -1,13 +1,17 @@
 import argparse
+import json
 import logging
 import re
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import List, Optional, Set, Tuple
+
+from auto_image_selection import prompt_for_image_options
 
 
 
@@ -342,6 +346,7 @@ def write_auto_image_config(
     source_name: str,
     image_size: int,
     split: str,
+    selected_images: Optional[List[dict]] = None,
 ) -> None:
     config_example = auto_image_dir / "config.example.yaml"
     config_target = auto_image_dir / "config.yaml"
@@ -360,6 +365,7 @@ def write_auto_image_config(
         "source_name": source_name,
         "image_size": str(image_size),
         "split": split,
+        "selected_images": json.dumps(selected_images) if selected_images else "null",
         # Default to full multi-band imaging behavior unless explicitly edited later.
         "use_single_band": "False",
         # Ensure imfit summary CSV and per-image fit outputs are written.
@@ -373,12 +379,12 @@ def write_auto_image_config(
         if pattern.search(content):
             def replacer(match) -> str:
                 prefix = match.group(1)
-                if key in numeric_keys or key in bool_keys:
+                if key in numeric_keys or key in bool_keys or key == "selected_images":
                     return f"{prefix}{value}"
                 return f'{prefix}"{value}"'
 
             return pattern.sub(replacer, content, count=1)
-        if key in numeric_keys or key in bool_keys:
+        if key in numeric_keys or key in bool_keys or key == "selected_images":
             return content.rstrip() + f"\n{key}: {value}\n"
         return content.rstrip() + f"\n{key}: \"{value}\"\n"
 
@@ -417,6 +423,11 @@ def parse_args() -> argparse.Namespace:
         default="both",
         choices=["whole", "halves", "both"],
         help="split value written to auto-image-VLA/config.yaml",
+    )
+    parser.add_argument(
+        "--auto-image-select",
+        action="store_true",
+        help="Inspect SDM-BDF metadata and interactively select available bands/frequency groups to image.",
     )
     parser.add_argument("--temp-dir", type=str, default=None, help="Directory for temporary downloads/extraction")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
@@ -518,6 +529,36 @@ def stage_observation_contents(
     return observation_name
 
 
+def read_sdm_bdf_image_options(source_path: Path, split: str) -> List[dict]:
+    metadata_script = Path(__file__).resolve().with_name("metadata-scraper-CB.py")
+    command = [
+        sys.executable,
+        str(metadata_script),
+        str(source_path),
+        "--output-format",
+        "json",
+        "--include-image-options",
+        "--split",
+        split,
+    ]
+    result = subprocess.run(
+        command,
+        cwd=metadata_script.parent,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"return code {result.returncode}"
+        raise RuntimeError(f"Could not inspect SDM-BDF imaging metadata: {detail}")
+    try:
+        metadata = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Invalid output from SDM-BDF metadata scraper: {exc}") from exc
+    return metadata.get("image_options", [])
+
+
 def main() -> None:
     args = parse_args()
     logger = configure_logging(args.verbose, args.quiet)
@@ -590,6 +631,18 @@ def main() -> None:
             args.observation_date,
         )
 
+    selected_images = None
+    if args.auto_image_select:
+        try:
+            selected_images = prompt_for_image_options(
+                read_sdm_bdf_image_options(
+                    workdir_path / observation_subdir_name,
+                    args.auto_image_split,
+                )
+            )
+        except (FileNotFoundError, RuntimeError, ValueError) as exc:
+            sys.exit(f"Error: {exc}")
+
     if not cb_template_src.exists():
         sys.exit(f"Error: CB template directory {cb_template_src} does not exist.")
     if not auto_image_vla_src.exists() or not auto_image_vla_src.is_dir():
@@ -615,6 +668,7 @@ def main() -> None:
         args.object_name,
         args.auto_image_size,
         args.auto_image_split,
+        selected_images,
     )
 
     casa_script = workdir_path / "casa_pipescript_666.py"

@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
+from auto_image_selection import build_image_options
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -17,6 +19,17 @@ def parse_args():
         choices=["plain", "json"],
         default="plain",
         help="Output format for the extracted metadata",
+    )
+    parser.add_argument(
+        "--include-image-options",
+        action="store_true",
+        help="Include available band/frequency-group products from the SDM-BDF metadata.",
+    )
+    parser.add_argument(
+        "--split",
+        choices=["whole", "halves", "both"],
+        default="both",
+        help="Frequency groups to include when --include-image-options is used.",
     )
     return parser.parse_args()
 
@@ -269,18 +282,42 @@ def extract_metadata(root, project_code_override=None):
     return extract_sdm_bdf_metadata(root, project_code_override=project_code_override)
 
 
+def extract_sdm_bdf_image_options(root, split="both"):
+    spectral_window_file = find_xml_file(root, "SpectralWindow.xml")
+    if spectral_window_file is None:
+        raise FileNotFoundError(f"SpectralWindow.xml not found under SDM-BDF path: {root}")
+
+    tree = ET.parse(spectral_window_file)
+    spectral_windows = []
+    for spw_id, row in enumerate(iter_elements_by_local_name(tree.getroot(), "row")):
+        name = child_text(row, "name")
+        raw_frequencies = child_text(row, "chanFreq")
+        frequencies = re.findall(r"[-+]?\d+(?:\.\d*)?(?:[eE][-+]?\d+)?", raw_frequencies)
+        if not frequencies:
+            reference_frequency = child_text(row, "refFreq")
+            frequencies = re.findall(r"[-+]?\d+(?:\.\d*)?(?:[eE][-+]?\d+)?", reference_frequency)
+        if not frequencies:
+            continue
+        frequency_hz = sum(float(value) for value in frequencies) / len(frequencies)
+        spectral_windows.append((spw_id, name, frequency_hz))
+
+    return build_image_options(spectral_windows, split)
+
+
 def main():
     args = parse_args()
-    project_code, target, obs_date = extract_metadata(
-        args.mspath,
-        project_code_override=args.project_code,
-    )
-
-    output = {
-        "project_code": project_code,
-        "object_name": target,
-        "observation_date": obs_date,
-    }
+    if args.include_image_options:
+        output = {"image_options": extract_sdm_bdf_image_options(args.mspath, args.split)}
+    else:
+        project_code, target, obs_date = extract_metadata(
+            args.mspath,
+            project_code_override=args.project_code,
+        )
+        output = {
+            "project_code": project_code,
+            "object_name": target,
+            "observation_date": obs_date,
+        }
 
     if args.output_format == "json":
         print(json.dumps(output))

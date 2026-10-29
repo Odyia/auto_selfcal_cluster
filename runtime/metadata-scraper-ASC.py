@@ -4,6 +4,8 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from auto_image_selection import build_image_options
+
 try:
     import casacore.tables as ct
     TABLE_BACKEND = "casacore"
@@ -32,6 +34,27 @@ def parse_args():
         choices=["plain", "json"],
         default="plain",
         help="Output format for the extracted metadata",
+    )
+    parser.add_argument(
+        "--include-image-options",
+        action="store_true",
+        help="Include available band/frequency-group products from the measurement-set metadata.",
+    )
+    parser.add_argument(
+        "--split",
+        choices=["whole", "halves", "both"],
+        default="both",
+        help="Frequency groups to include when --include-image-options is used.",
+    )
+    parser.add_argument(
+        "--use-single-band",
+        action="store_true",
+        help="Match the auto-image config's single-band behavior when building available products.",
+    )
+    parser.add_argument(
+        "--single-band",
+        default="EVLA_C",
+        help="Band selected when --use-single-band is enabled.",
     )
     return parser.parse_args()
 
@@ -569,17 +592,58 @@ def extract_ms_metadata(ms_path, project_code_override=None):
     return project_code, object_name, observation_date
 
 
+def extract_ms_image_options(
+    ms_path,
+    split="both",
+    use_single_band=False,
+    single_band="EVLA_C",
+):
+    table = open_ms_table(ms_path, "SPECTRAL_WINDOW")
+    try:
+        names = normalize_column_values(table.getcol("NAME"))
+        spectral_windows = []
+        for spw_id in range(table.nrows()):
+            frequencies = normalize_column_values(table.getcell("CHAN_FREQ", spw_id))
+            if not frequencies:
+                continue
+            frequency_hz = sum(float(value) for value in frequencies) / len(frequencies)
+            name = str(names[spw_id]).strip() if spw_id < len(names) else ""
+            spectral_windows.append((spw_id, name, frequency_hz))
+    finally:
+        close_ms_table(table)
+
+    return build_image_options(
+        spectral_windows,
+        split,
+        use_single_band=use_single_band,
+        single_band=single_band,
+    )
+
+
 def main():
     args = parse_args()
-    project_code, target, obs_date = extract_ms_metadata(
-        args.mspath,
-        project_code_override=args.project_code,
-    )
-    output = {
-        "project_code": project_code,
-        "object_name": target,
-        "observation_date": obs_date,
-    }
+    ms_path = find_ms_directory(Path(args.mspath))
+    if ms_path is None:
+        raise RuntimeError(f"Path does not contain a recognized measurement set: {args.mspath}")
+    if args.include_image_options:
+        output = {
+            "image_options": extract_ms_image_options(
+                ms_path,
+                args.split,
+                use_single_band=args.use_single_band,
+                single_band=args.single_band,
+            )
+        }
+    else:
+        project_code, target, obs_date = extract_ms_metadata(
+            ms_path,
+            project_code_override=args.project_code,
+        )
+        output = {
+            "project_code": project_code,
+            "object_name": target,
+            "observation_date": obs_date,
+        }
     if args.output_format == "json":
         print(json.dumps(output))
     else:

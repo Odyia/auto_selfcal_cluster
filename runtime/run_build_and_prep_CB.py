@@ -100,6 +100,11 @@ def parse_args() -> argparse.Namespace:
         choices=["whole", "halves", "both"],
         help="split value written to auto-image-VLA/config.yaml",
     )
+    parser.add_argument(
+        "--auto-image-select",
+        action="store_true",
+        help="Inspect SDM-BDF metadata and interactively select available bands/frequency groups to image.",
+    )
     parser.add_argument("--temp-dir", help="Optional temporary directory for downloads and extraction")
 
     parser.add_argument("--skip-submit", action="store_true", help="Build and prepare the job, but do not submit")
@@ -393,6 +398,8 @@ def run_build(
         "--auto-image-split",
         args.auto_image_split,
     ]
+    if args.auto_image_select:
+        command.append("--auto-image-select")
     if args.local_dataset:
         command.extend(["--local-dataset", args.local_dataset])
     if args.temp_dir:

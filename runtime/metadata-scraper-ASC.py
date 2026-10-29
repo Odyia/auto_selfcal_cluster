@@ -1,6 +1,7 @@
 import argparse
 import json
 import re
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -55,6 +56,11 @@ def parse_args():
         "--single-band",
         default="EVLA_C",
         help="Band selected when --use-single-band is enabled.",
+    )
+    parser.add_argument(
+        "--casa-executable",
+        default=None,
+        help="CASA executable used to inspect spectral windows when casacore/pyrap is unavailable.",
     )
     return parser.parse_args()
 
@@ -597,20 +603,29 @@ def extract_ms_image_options(
     split="both",
     use_single_band=False,
     single_band="EVLA_C",
+    casa_executable=None,
 ):
-    table = open_ms_table(ms_path, "SPECTRAL_WINDOW")
-    try:
-        names = normalize_column_values(table.getcol("NAME"))
-        spectral_windows = []
-        for spw_id in range(table.nrows()):
-            frequencies = normalize_column_values(table.getcell("CHAN_FREQ", spw_id))
-            if not frequencies:
-                continue
-            frequency_hz = sum(float(value) for value in frequencies) / len(frequencies)
-            name = str(names[spw_id]).strip() if spw_id < len(names) else ""
-            spectral_windows.append((spw_id, name, frequency_hz))
-    finally:
-        close_ms_table(table)
+    if TABLE_BACKEND:
+        table = open_ms_table(ms_path, "SPECTRAL_WINDOW")
+        try:
+            names = normalize_column_values(table.getcol("NAME"))
+            spectral_windows = []
+            for spw_id in range(table.nrows()):
+                frequencies = normalize_column_values(table.getcell("CHAN_FREQ", spw_id))
+                if not frequencies:
+                    continue
+                frequency_hz = sum(float(value) for value in frequencies) / len(frequencies)
+                name = str(names[spw_id]).strip() if spw_id < len(names) else ""
+                spectral_windows.append((spw_id, name, frequency_hz))
+        finally:
+            close_ms_table(table)
+    else:
+        if not casa_executable:
+            raise RuntimeError(
+                "No casacore/pyrap backend is installed for Measurement Set metadata. "
+                "Provide a CASA executable with --casa-executable."
+            )
+        spectral_windows = read_spectral_windows_with_casa(ms_path, casa_executable)
 
     return build_image_options(
         spectral_windows,
@@ -618,6 +633,65 @@ def extract_ms_image_options(
         use_single_band=use_single_band,
         single_band=single_band,
     )
+
+
+def read_spectral_windows_with_casa(ms_path, casa_executable):
+    marker = "AUTO_IMAGE_SPECTRAL_WINDOWS="
+    casa_code = (
+        "from casatools import table\n"
+        "import json\n"
+        f"_ms_path = {str(Path(ms_path).resolve())!r}\n"
+        "_tb = table()\n"
+        "_spectral_windows = []\n"
+        "_table_open = False\n"
+        "try:\n"
+        "    _tb.open(_ms_path + '/SPECTRAL_WINDOW')\n"
+        "    _table_open = True\n"
+        "    _names = _tb.getcol('NAME')\n"
+        "    for _spw_id in range(_tb.nrows()):\n"
+        "        _frequencies = _tb.getcell('CHAN_FREQ', _spw_id)\n"
+        "        if len(_frequencies):\n"
+        "            _spectral_windows.append([\n"
+        "                _spw_id,\n"
+        "                str(_names[_spw_id]).strip(),\n"
+        "                sum(float(_frequency) for _frequency in _frequencies) / len(_frequencies),\n"
+        "            ])\n"
+        "finally:\n"
+        "    if _table_open:\n"
+        "        _tb.close()\n"
+        f"print({marker!r} + json.dumps(_spectral_windows))\n"
+    )
+    result = subprocess.run(
+        [casa_executable, "--nogui", "-c", casa_code],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(
+            f"CASA could not read the Measurement Set spectral windows: "
+            f"{detail or f'exit code {result.returncode}'}"
+        )
+
+    match = re.search(
+        rf"(?m)^{re.escape(marker)}(.*)$",
+        result.stdout,
+    )
+    if not match:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(
+            "CASA did not return Measurement Set spectral-window metadata."
+            + (f" CASA output: {detail}" if detail else "")
+        )
+    try:
+        return [
+            (int(spw_id), str(name), float(frequency_hz))
+            for spw_id, name, frequency_hz in json.loads(match.group(1))
+        ]
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"CASA returned invalid spectral-window metadata: {exc}") from exc
 
 
 def main():
@@ -632,6 +706,7 @@ def main():
                 args.split,
                 use_single_band=args.use_single_band,
                 single_band=args.single_band,
+                casa_executable=args.casa_executable,
             )
         }
     else:

@@ -165,7 +165,7 @@ def parse_args():
     parser.add_argument(
         "--auto-image-casa-executable",
         default="casa-pipe",
-        help="CASA executable for standalone auto-image direct runs (default: casa-pipe).",
+        help="CASA executable for standalone runs and Measurement Set metadata inspection (default: casa-pipe).",
     )
     parser.add_argument("--asc-source-name", help="Source name to write into the ASC prep script, overriding metadata inference.")
     parser.add_argument(
@@ -760,6 +760,7 @@ def read_auto_image_image_options(
     split: str,
     use_single_band: bool,
     single_band: str,
+    casa_executable: str,
 ) -> list:
     metadata_script = script_dir / "runtime" / "metadata-scraper-ASC.py"
     if not metadata_script.exists():
@@ -777,6 +778,7 @@ def read_auto_image_image_options(
     ]
     if use_single_band:
         command.extend(["--use-single-band", "--single-band", single_band])
+    command.extend(["--casa-executable", casa_executable])
     result = subprocess.run(
         command,
         cwd=script_dir,
@@ -1292,6 +1294,7 @@ def run_auto_image_workflow(args: argparse.Namespace, source_url: Optional[str] 
                 configured_split,
                 configured_use_single_band,
                 configured_single_band,
+                args.auto_image_casa_executable,
             )
         )
         update_auto_image_selection(config_path, selected_images)

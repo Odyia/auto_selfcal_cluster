@@ -3,4 +3,4 @@
 	url = https://github.com/psheehan/auto_selfcal
 [submodule "repo/auto-image-VLA"]
 	path = repo/auto-image-VLA
-	url = https://github.com/jlynch2195/auto-image-VLA
+	url = https://github.com/Odyia/auto-image-VLA

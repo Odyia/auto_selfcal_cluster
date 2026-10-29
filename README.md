@@ -111,7 +111,7 @@ For an existing CB workdir:
 ```
 python auto-calibration.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-submit
 ```
-Add `--auto-image-select` to inspect the available Measurement Set or SDM-BDF metadata and interactively choose image products before running or submitting. The menu lists only bands/frequency groups present in the dataset and respects `--auto-image-split`; select one or more numbered products, or `all`. For CB, the selection is stored in the generated auto-image config before the calibration jobs are submitted, so the later Slurm auto-image job does not need an interactive terminal. For standalone auto-image, the wrapper checks the Measurement Set before launching CASA or submitting its Slurm job.
+Add `--auto-image-select` to inspect the available Measurement Set or SDM-BDF metadata and interactively choose image products before running or submitting. The menu lists only bands/frequency groups present in the dataset and respects `--auto-image-split`; select one or more numbered products, or `all`. For a Measurement Set, metadata is read using casacore/pyrap when available, or through the configured CASA executable (`--auto-image-casa-executable`) otherwise. For CB, the selection is stored in the generated auto-image config before the calibration jobs are submitted, so the later Slurm auto-image job does not need an interactive terminal. For standalone auto-image, the wrapper checks the Measurement Set before launching CASA or submitting its Slurm job.
 ```
 python auto-calibration.py --pipeline cb --url 'your-link-goes-here' --auto-image-select
 python auto-calibration.py --pipeline auto-image --asc-ms-path 'path-to-directory' --auto-image-select --auto-image-submit
@@ -317,7 +317,7 @@ Submit auto-image via sbatch run_auto_image.sh instead of running CASA directly
     
 `--auto-image-casa-executable`
 default = "casa-pipe",
-CASA executable to use for standalone auto-image direct runs
+CASA executable to use for standalone auto-image runs and, when `--auto-image-select` is enabled, to inspect Measurement Set metadata if system Python does not have casacore/pyrap installed. Override this if your CASA executable has a different name or path.
 
 ### ASC Flags
 

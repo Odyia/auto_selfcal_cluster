@@ -711,6 +711,64 @@ def patch_auto_image_output_directory(auto_image_dir: Path) -> None:
     )
 
 
+def ensure_auto_image_selection_support(auto_image_dir: Path) -> None:
+    helper_path = auto_image_dir / "helper_functions.py"
+    run_path = auto_image_dir / "run-auto-image.py"
+    helper_text = helper_path.read_text(encoding="utf-8")
+    run_text = run_path.read_text(encoding="utf-8")
+
+    filter_function = '''
+def filter_image_options(df_store, selected_images):
+    if not selected_images:
+        return df_store
+
+    selected_keys = {
+        (option["band"], option["split"], round(float(option["frequency_ghz"]), 2))
+        for option in selected_images
+    }
+    mask = [
+        (row["band"], row["split"], round(float(row["freq [GHz]"]), 2)) in selected_keys
+        for _, row in df_store.iterrows()
+    ]
+    filtered = df_store.loc[mask].reset_index(drop=True)
+    if filtered.empty:
+        raise ValueError(
+            "None of the selected bands/frequency groups are present in the Measurement Set listobs metadata."
+        )
+    return filtered
+'''
+    if "def filter_image_options(" not in helper_text:
+        helper_text = helper_text.rstrip() + "\n\n" + filter_function.lstrip()
+
+    if "selected_images = config.get(" not in run_text:
+        single_band_line = 'single_band = config["single_band"]'
+        if single_band_line not in run_text:
+            raise RuntimeError(
+                f"Could not add saved image selections to {run_path}: single_band config line not found."
+            )
+        run_text = run_text.replace(
+            single_band_line,
+            single_band_line + '\nselected_images = config.get("selected_images")',
+            1,
+        )
+
+    filter_call = "df_store = filter_image_options(df_store, selected_images)"
+    if filter_call not in run_text:
+        listfile_scrape = re.compile(
+            r"(?m)^(\s*)df_store,\s*field\s*=\s*scrape_listfile\([^\n]*\)\s*$"
+        )
+        match = listfile_scrape.search(run_text)
+        if not match:
+            raise RuntimeError(
+                f"Could not apply saved image selections in {run_path}: scrape_listfile call not found."
+            )
+        insertion = f"{match.group(0)}\n{match.group(1)}{filter_call}"
+        run_text = listfile_scrape.sub(insertion, run_text, count=1)
+
+    helper_path.write_text(helper_text, encoding="utf-8")
+    run_path.write_text(run_text, encoding="utf-8")
+
+
 def read_auto_image_source_name(args: argparse.Namespace, script_dir: Path, ms_path: Path) -> str:
     if args.auto_image_source_name:
         return args.auto_image_source_name
@@ -1249,6 +1307,8 @@ def run_auto_image_workflow(args: argparse.Namespace, source_url: Optional[str] 
         config_path = auto_image_dir / "config.yaml"
 
     patch_auto_image_output_directory(auto_image_dir)
+    if args.auto_image_select:
+        ensure_auto_image_selection_support(auto_image_dir)
     update_auto_image_size(config_path, args.auto_image_size)
     auto_image_script = auto_image_dir / "run-auto-image.py"
 

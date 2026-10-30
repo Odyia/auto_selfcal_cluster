@@ -31,6 +31,11 @@ def parse_args():
         default="both",
         help="Frequency groups to include when --include-image-options is used.",
     )
+    parser.add_argument(
+        "--target-name",
+        default=None,
+        help="Target source name used to select scans when multiple target fields are present.",
+    )
     return parser.parse_args()
 
 
@@ -129,12 +134,174 @@ def iter_elements_by_local_name(root, name):
             yield element
 
 
+def iter_xml_rows(path):
+    context = ET.iterparse(path, events=("start", "end"))
+    stack = []
+    for event, element in context:
+        if event == "start":
+            stack.append(element)
+            continue
+        is_row = isinstance(element.tag, str) and (
+            element.tag.lower().endswith("}row") or element.tag == "row"
+        )
+        if is_row:
+            yield element
+            element.clear()
+            if len(stack) > 1:
+                stack[-2].remove(element)
+        stack.pop()
+
+
 def child_text(element, name):
     for child in list(element):
         tag = child.tag
         if isinstance(tag, str) and (tag.lower() == name.lower() or tag.lower().endswith("}" + name.lower())):
             return (child.text or "").strip()
     return ""
+
+
+def parse_asdm_ids(value):
+    text = str(value or "").strip()
+    uid_tokens = re.findall(r"uid://[^\s,;{}\[\]()<>\"']+", text, flags=re.IGNORECASE)
+    if uid_tokens:
+        return {token.rstrip(".,:") for token in uid_tokens}
+
+    numeric_text = text.strip(" \t\r\n[](){}")
+    numeric_tokens = re.split(r"[\s,;]+", numeric_text) if numeric_text else []
+    if numeric_tokens and all(token.isdecimal() for token in numeric_tokens):
+        return set(numeric_tokens)
+    return set()
+
+
+def parse_asdm_scan_number(value):
+    text = str(value or "").strip()
+    return int(text) if text.isdecimal() else None
+
+
+def normalize_source_name(value):
+    return "".join(character.lower() for character in str(value or "") if character.isalnum())
+
+
+def extract_target_spectral_window_ids(root, target_name=None):
+    scan_file = find_xml_file(root, "Scan.xml")
+    spectral_window_file = find_xml_file(root, "SpectralWindow.xml")
+    data_description_file = find_xml_file(root, "DataDescription.xml")
+    config_description_file = find_xml_file(root, "ConfigDescription.xml")
+    if scan_file is None or spectral_window_file is None:
+        raise FileNotFoundError(
+            "Scan.xml and SpectralWindow.xml are required to identify target-associated spectral windows."
+        )
+
+    all_scans = []
+    for row in iter_xml_rows(scan_file):
+        intent = child_text(row, "scanIntent").upper()
+        scan_number = parse_asdm_scan_number(child_text(row, "scanNumber"))
+        if scan_number is None:
+            continue
+        all_scans.append(
+            {
+                "exec_block_id": child_text(row, "execBlockId"),
+                "scan_number": scan_number,
+                "config_ids": parse_asdm_ids(child_text(row, "configDescriptionId")),
+                "source_name": child_text(row, "sourceName"),
+                "is_target": "OBSERVE_TARGET" in intent or intent.startswith("TARGET"),
+            }
+        )
+
+    target_scans = [scan for scan in all_scans if scan["is_target"]]
+    if not target_scans:
+        raise RuntimeError("No target-intent scans were found in the SDM-BDF Scan.xml metadata.")
+
+    target_sources = {
+        normalize_source_name(scan["source_name"]): scan["source_name"]
+        for scan in target_scans
+        if scan["source_name"]
+    }
+    if target_name:
+        normalized_target = normalize_source_name(target_name)
+        if normalized_target not in target_sources:
+            available = sorted(target_sources.values())
+            raise RuntimeError(
+                f"Could not match target source {target_name!r} to an SDM-BDF target scan. "
+                f"Target scan sources: {', '.join(available) or 'none'}."
+            )
+        target_sources = {normalized_target: target_sources[normalized_target]}
+    elif len(target_sources) > 1:
+        raise RuntimeError(
+            "Multiple target-intent sources were found in the SDM-BDF metadata. "
+            f"Specify --target-name from: {', '.join(sorted(target_sources.values()))}."
+        )
+
+    selected_source_names = set(target_sources)
+    scans = [
+        scan
+        for scan in all_scans
+        if normalize_source_name(scan["source_name"]) in selected_source_names
+    ]
+
+    if any(not scan["exec_block_id"] for scan in scans):
+        raise RuntimeError(
+            "An SDM-BDF scan for the selected target is missing its execution-block ID; "
+            "cannot safely map its spectral windows."
+        )
+
+    target_scan_keys = {
+        (scan["exec_block_id"], scan["scan_number"])
+        for scan in scans
+    }
+    main_file = find_xml_file(root, "Main.xml")
+    target_data_description_ids = set()
+    if main_file is not None:
+        for row in iter_xml_rows(main_file):
+            scan_number = parse_asdm_scan_number(child_text(row, "scanNumber"))
+            if scan_number is None:
+                continue
+            scan_key = (child_text(row, "execBlockId"), scan_number)
+            if scan_key in target_scan_keys:
+                target_data_description_ids.update(
+                    parse_asdm_ids(child_text(row, "dataDescriptionId"))
+                )
+
+    data_description_to_spw = {}
+    if data_description_file is not None:
+        for row in iter_xml_rows(data_description_file):
+            data_description_ids = parse_asdm_ids(child_text(row, "dataDescriptionId"))
+            spectral_window_ids = parse_asdm_ids(child_text(row, "spectralWindowId"))
+            if len(data_description_ids) == 1 and len(spectral_window_ids) == 1:
+                data_description_to_spw[next(iter(data_description_ids))] = next(iter(spectral_window_ids))
+
+    target_spw_ids = {
+        data_description_to_spw[data_description_id]
+        for data_description_id in target_data_description_ids
+        if data_description_id in data_description_to_spw
+    }
+
+    if not target_spw_ids and config_description_file is not None and data_description_to_spw:
+        config_to_data_descriptions = {}
+        for row in iter_xml_rows(config_description_file):
+            config_ids = parse_asdm_ids(child_text(row, "configDescriptionId"))
+            data_description_ids = parse_asdm_ids(child_text(row, "dataDescriptionId"))
+            for config_id in config_ids:
+                config_to_data_descriptions[config_id] = data_description_ids
+
+        target_config_ids = {
+            config_id
+            for scan in scans
+            for config_id in scan["config_ids"]
+        }
+        target_spw_ids = {
+            data_description_to_spw[data_description_id]
+            for config_id in target_config_ids
+            for data_description_id in config_to_data_descriptions.get(config_id, set())
+            if data_description_id in data_description_to_spw
+        }
+
+    if not target_spw_ids:
+        raise RuntimeError(
+            "Could not map target-intent scans to spectral windows in the SDM-BDF metadata. "
+            "Refusing to infer setup windows from SPW ordering."
+        )
+    return target_spw_ids
 
 
 def search_project_code_in_sdm(root):
@@ -282,14 +449,18 @@ def extract_metadata(root, project_code_override=None):
     return extract_sdm_bdf_metadata(root, project_code_override=project_code_override)
 
 
-def extract_sdm_bdf_image_options(root, split="both"):
+def extract_sdm_bdf_image_options(root, split="both", target_name=None):
     spectral_window_file = find_xml_file(root, "SpectralWindow.xml")
     if spectral_window_file is None:
         raise FileNotFoundError(f"SpectralWindow.xml not found under SDM-BDF path: {root}")
 
-    tree = ET.parse(spectral_window_file)
     spectral_windows = []
-    for spw_id, row in enumerate(iter_elements_by_local_name(tree.getroot(), "row")):
+    spectral_window_ids = {}
+    for spw_id, row in enumerate(iter_xml_rows(spectral_window_file)):
+        asdm_spw_ids = parse_asdm_ids(child_text(row, "spectralWindowId"))
+        if len(asdm_spw_ids) != 1:
+            continue
+        asdm_spw_id = next(iter(asdm_spw_ids))
         name = child_text(row, "name")
         raw_frequencies = child_text(row, "chanFreq")
         frequencies = re.findall(r"[-+]?\d+(?:\.\d*)?(?:[eE][-+]?\d+)?", raw_frequencies)
@@ -300,14 +471,35 @@ def extract_sdm_bdf_image_options(root, split="both"):
             continue
         frequency_hz = sum(float(value) for value in frequencies) / len(frequencies)
         spectral_windows.append((spw_id, name, frequency_hz))
+        spectral_window_ids[asdm_spw_id] = spw_id
 
-    return build_image_options(spectral_windows, split)
+    target_asdm_spw_ids = extract_target_spectral_window_ids(root, target_name)
+    target_spw_ids = {
+        spectral_window_ids[spw_id]
+        for spw_id in target_asdm_spw_ids
+        if spw_id in spectral_window_ids
+    }
+    if not target_spw_ids:
+        raise RuntimeError(
+            "Target scans were identified, but none of their spectral windows have valid frequency metadata."
+        )
+    return build_image_options(
+        spectral_windows,
+        split,
+        target_spw_ids=target_spw_ids,
+    )
 
 
 def main():
     args = parse_args()
     if args.include_image_options:
-        output = {"image_options": extract_sdm_bdf_image_options(args.mspath, args.split)}
+        output = {
+            "image_options": extract_sdm_bdf_image_options(
+                args.mspath,
+                args.split,
+                target_name=args.target_name,
+            )
+        }
     else:
         project_code, target, obs_date = extract_metadata(
             args.mspath,
@@ -320,6 +512,8 @@ def main():
         }
 
     if args.output_format == "json":
+        print(json.dumps(output))
+    elif args.include_image_options:
         print(json.dumps(output))
     else:
         print(project_code)

@@ -58,6 +58,11 @@ def parse_args():
         help="Band selected when --use-single-band is enabled.",
     )
     parser.add_argument(
+        "--target-name",
+        default=None,
+        help="Target field name used when Measurement Set intent metadata is unavailable.",
+    )
+    parser.add_argument(
         "--casa-executable",
         default=None,
         help="CASA executable used to inspect spectral windows when casacore/pyrap is unavailable.",
@@ -408,6 +413,51 @@ def read_extracted_metadata_from_workdir(ms_path):
     return values
 
 
+def extract_ms_target_field_names(ms_path):
+    field_table = state_table = main_table = None
+    try:
+        field_table = open_ms_table(ms_path, "FIELD")
+        field_names = normalize_column_values(field_table.getcol("NAME"))
+
+        state_modes = []
+        try:
+            state_table = open_ms_table(ms_path, "STATE")
+            if "OBS_MODE" in state_table.colnames():
+                state_modes = normalize_column_values(state_table.getcol("OBS_MODE"))
+        except (FileNotFoundError, RuntimeError):
+            return []
+
+        target_state_ids = [
+            state_id
+            for state_id, mode in enumerate(state_modes)
+            if _is_target_intent(mode)
+        ]
+        if not target_state_ids:
+            return []
+
+        main_table = open_ms_table(ms_path, "")
+        target_field_ids = set()
+        for state_id in target_state_ids:
+            selected_rows = main_table.query(f"STATE_ID == {state_id}")
+            try:
+                target_field_ids.update(
+                    int(field_id)
+                    for field_id in normalize_column_values(selected_rows.getcol("FIELD_ID"))
+                )
+            finally:
+                close_ms_table(selected_rows)
+
+        return [
+            str(field_names[field_id]).strip()
+            for field_id in sorted(target_field_ids)
+            if 0 <= field_id < len(field_names)
+        ]
+    finally:
+        for table in (main_table, state_table, field_table):
+            if table is not None:
+                close_ms_table(table)
+
+
 def extract_ms_project_code(ms_path, project_code_override=None):
     if project_code_override:
         return project_code_override
@@ -452,6 +502,11 @@ def extract_ms_object_name(ms_path):
         return extracted["object_name"]
 
     object_name = None
+
+    if TABLE_BACKEND:
+        target_field_names = extract_ms_target_field_names(ms_path)
+        if target_field_names:
+            return target_field_names[0]
     
     # First try: look for a source name in the SOURCE table
     if TABLE_BACKEND:
@@ -604,6 +659,7 @@ def extract_ms_image_options(
     use_single_band=False,
     single_band="EVLA_C",
     casa_executable=None,
+    target_name=None,
 ):
     if TABLE_BACKEND:
         table = open_ms_table(ms_path, "SPECTRAL_WINDOW")
@@ -619,47 +675,260 @@ def extract_ms_image_options(
                 spectral_windows.append((spw_id, name, frequency_hz))
         finally:
             close_ms_table(table)
+        target_spw_ids = read_target_spw_ids_from_tables(ms_path, target_name)
     else:
         if not casa_executable:
             raise RuntimeError(
                 "No casacore/pyrap backend is installed for Measurement Set metadata. "
                 "Provide a CASA executable with --casa-executable."
             )
-        spectral_windows = read_spectral_windows_with_casa(ms_path, casa_executable)
+        spectral_windows, target_spw_ids = read_spectral_windows_with_casa(
+            ms_path,
+            casa_executable,
+            target_name,
+        )
 
     return build_image_options(
         spectral_windows,
         split,
         use_single_band=use_single_band,
         single_band=single_band,
+        target_spw_ids=target_spw_ids,
     )
 
 
-def read_spectral_windows_with_casa(ms_path, casa_executable):
-    marker = "AUTO_IMAGE_SPECTRAL_WINDOWS="
+def _normalize_target_name(value):
+    return "".join(character.lower() for character in str(value) if character.isalnum())
+
+
+def _is_target_intent(value):
+    intent = str(value).upper()
+    return "OBSERVE_TARGET" in intent or intent == "TARGET" or intent.startswith("TARGET#")
+
+
+def resolve_target_spw_ids(field_names, main_rows, state_modes, data_description_spws, target_name=None):
+    target_state_ids = {
+        state_id
+        for state_id, mode in enumerate(state_modes)
+        if _is_target_intent(mode)
+    }
+    rows = [
+        (int(field_id), int(data_description_id), int(state_id))
+        for field_id, data_description_id, state_id in main_rows
+    ]
+
+    if target_state_ids:
+        target_rows = [row for row in rows if row[2] in target_state_ids]
+        target_fields = {row[0] for row in target_rows}
+        if not target_fields:
+            raise RuntimeError("The Measurement Set has target intents but no rows associated with them.")
+    else:
+        target_rows = rows
+        target_fields = {row[0] for row in rows}
+
+    matching_fields = set()
+    if target_name:
+        normalized_target = _normalize_target_name(target_name)
+        matching_fields = {
+            field_id
+            for field_id, name in enumerate(field_names)
+            if _normalize_target_name(name) == normalized_target
+        }
+
+    if target_state_ids:
+        if matching_fields:
+            selected_fields = matching_fields & target_fields
+            if not selected_fields:
+                target_field_names = [
+                    str(field_names[field_id]) if 0 <= field_id < len(field_names) else str(field_id)
+                    for field_id in sorted(target_fields)
+                ]
+                raise RuntimeError(
+                    f"Configured auto-image source {target_name!r} does not match a target-intent field. "
+                    f"Target fields: {', '.join(target_field_names)}."
+                )
+        elif len(target_fields) == 1:
+            selected_fields = target_fields
+        elif target_name:
+            raise RuntimeError(
+                f"Could not match auto-image source {target_name!r} to a target-intent field. "
+                f"Target fields: {', '.join(str(field_names[field_id]) for field_id in sorted(target_fields))}."
+            )
+        else:
+            selected_fields = target_fields
+        image_rows = [row for row in target_rows if row[0] in selected_fields]
+    else:
+        if not matching_fields:
+            raise RuntimeError(
+                "The Measurement Set has no target-intent metadata. Provide a source name that exactly "
+                "matches a FIELD.NAME entry so its spectral windows can be identified safely."
+            )
+        image_rows = [row for row in rows if row[0] in matching_fields]
+
+    valid_data_description_ids = {row[1] for row in image_rows}
+    target_spw_ids = {
+        int(spw_id)
+        for data_description_id, spw_id in enumerate(data_description_spws)
+        if data_description_id in valid_data_description_ids
+    }
+    if not target_spw_ids:
+        raise RuntimeError(
+            "Could not associate any spectral windows with the selected target field and target scans."
+        )
+    return target_spw_ids
+
+
+def read_target_spw_ids_from_tables(ms_path, target_name=None):
+    field_table = state_table = data_description_table = main_table = None
+    try:
+        field_table = open_ms_table(ms_path, "FIELD")
+        field_names = normalize_column_values(field_table.getcol("NAME"))
+
+        state_modes = []
+        try:
+            state_table = open_ms_table(ms_path, "STATE")
+            if "OBS_MODE" in state_table.colnames():
+                state_modes = normalize_column_values(state_table.getcol("OBS_MODE"))
+        except (FileNotFoundError, RuntimeError):
+            state_modes = []
+        target_state_ids = [
+            state_id
+            for state_id, mode in enumerate(state_modes)
+            if _is_target_intent(mode)
+        ]
+
+        data_description_table = open_ms_table(ms_path, "DATA_DESCRIPTION")
+        data_description_spws = normalize_column_values(
+            data_description_table.getcol("SPECTRAL_WINDOW_ID")
+        )
+        main_table = open_ms_table(ms_path, "")
+
+        main_rows = set()
+        if target_state_ids:
+            for state_id in target_state_ids:
+                selected_rows = main_table.query(f"STATE_ID == {state_id}")
+                try:
+                    fields = normalize_column_values(selected_rows.getcol("FIELD_ID"))
+                    data_descriptions = normalize_column_values(
+                        selected_rows.getcol("DATA_DESC_ID")
+                    )
+                    main_rows.update(
+                        (int(field_id), int(data_description_id), state_id)
+                        for field_id, data_description_id in zip(fields, data_descriptions)
+                    )
+                finally:
+                    close_ms_table(selected_rows)
+        else:
+            normalized_target = _normalize_target_name(target_name or "")
+            matching_fields = [
+                field_id
+                for field_id, name in enumerate(field_names)
+                if normalized_target and _normalize_target_name(name) == normalized_target
+            ]
+            for field_id in matching_fields:
+                selected_rows = main_table.query(f"FIELD_ID == {field_id}")
+                try:
+                    fields = normalize_column_values(selected_rows.getcol("FIELD_ID"))
+                    data_descriptions = normalize_column_values(
+                        selected_rows.getcol("DATA_DESC_ID")
+                    )
+                    state_ids = normalize_column_values(selected_rows.getcol("STATE_ID"))
+                    main_rows.update(
+                        (int(field_id), int(data_description_id), int(state_id))
+                        for field_id, data_description_id, state_id in zip(
+                            fields,
+                            data_descriptions,
+                            state_ids,
+                        )
+                    )
+                finally:
+                    close_ms_table(selected_rows)
+
+        return resolve_target_spw_ids(
+            field_names,
+            main_rows,
+            state_modes,
+            data_description_spws,
+            target_name,
+        )
+    finally:
+        for table in (main_table, data_description_table, state_table, field_table):
+            if table is not None:
+                close_ms_table(table)
+
+
+def read_spectral_windows_with_casa(ms_path, casa_executable, target_name=None):
+    marker = "AUTO_IMAGE_METADATA="
     casa_code = (
         "from casatools import table\n"
         "import json\n"
+        "import re\n"
         f"_ms_path = {str(Path(ms_path).resolve())!r}\n"
+        f"_target_name = {target_name!r}\n"
         "_tb = table()\n"
         "_spectral_windows = []\n"
-        "_table_open = False\n"
+        "_field_names = []\n"
+        "_state_modes = []\n"
+        "_data_description_spws = []\n"
+        "_main_rows = set()\n"
         "try:\n"
         "    _tb.open(_ms_path + '/SPECTRAL_WINDOW')\n"
-        "    _table_open = True\n"
         "    _names = _tb.getcol('NAME')\n"
         "    for _spw_id in range(_tb.nrows()):\n"
         "        _frequencies = _tb.getcell('CHAN_FREQ', _spw_id)\n"
         "        if len(_frequencies):\n"
-        "            _spectral_windows.append([\n"
-        "                _spw_id,\n"
-        "                str(_names[_spw_id]).strip(),\n"
-        "                sum(float(_frequency) for _frequency in _frequencies) / len(_frequencies),\n"
-        "            ])\n"
+        "            _spectral_windows.append([_spw_id, str(_names[_spw_id]).strip(), "
+        "sum(float(_frequency) for _frequency in _frequencies) / len(_frequencies)])\n"
+        "    _tb.close()\n"
+        "    _tb.open(_ms_path + '/FIELD')\n"
+        "    _field_names = [str(_name).strip() for _name in _tb.getcol('NAME')]\n"
+        "    _tb.close()\n"
+        "    try:\n"
+        "        _tb.open(_ms_path + '/STATE')\n"
+        "        _state_modes = [str(_mode) for _mode in _tb.getcol('OBS_MODE')]\n"
+        "    except Exception:\n"
+        "        _state_modes = []\n"
+        "    finally:\n"
+        "        try: _tb.close()\n"
+        "        except Exception: pass\n"
+        "    _tb.open(_ms_path + '/DATA_DESCRIPTION')\n"
+        "    _data_description_spws = [int(_spw_id) for _spw_id in "
+        "_tb.getcol('SPECTRAL_WINDOW_ID')]\n"
+        "    _tb.close()\n"
+        "    _target_state_ids = [i for i, _mode in enumerate(_state_modes) "
+        "if 'OBSERVE_TARGET' in _mode.upper() or _mode.upper() == 'TARGET' "
+        "or _mode.upper().startswith('TARGET#')]\n"
+        "    _tb.open(_ms_path)\n"
+        "    if _target_state_ids:\n"
+        "        for _state_id in _target_state_ids:\n"
+        "            _selected = _tb.query('STATE_ID == ' + str(_state_id))\n"
+        "            try:\n"
+        "                _fields = _selected.getcol('FIELD_ID')\n"
+        "                _data_descriptions = _selected.getcol('DATA_DESC_ID')\n"
+        "                _main_rows.update((int(_field), int(_ddid), _state_id) "
+        "for _field, _ddid in zip(_fields, _data_descriptions))\n"
+        "            finally: _selected.close()\n"
+        "    elif _target_name:\n"
+        "        _normalize = lambda _value: re.sub(r'[^a-z0-9]', '', str(_value).lower())\n"
+        "        for _field_id, _field_name in enumerate(_field_names):\n"
+        "            if _normalize(_field_name) == _normalize(_target_name):\n"
+        "                _selected = _tb.query('FIELD_ID == ' + str(_field_id))\n"
+        "                try:\n"
+        "                    _fields = _selected.getcol('FIELD_ID')\n"
+        "                    _data_descriptions = _selected.getcol('DATA_DESC_ID')\n"
+        "                    _state_ids = _selected.getcol('STATE_ID')\n"
+        "                    _main_rows.update((int(_field), int(_ddid), int(_state_id)) "
+        "for _field, _ddid, _state_id in zip(_fields, _data_descriptions, _state_ids))\n"
+        "                finally: _selected.close()\n"
+        "    _tb.close()\n"
         "finally:\n"
-        "    if _table_open:\n"
-        "        _tb.close()\n"
-        f"print({marker!r} + json.dumps(_spectral_windows))\n"
+        "    try: _tb.close()\n"
+        "    except Exception: pass\n"
+        "    print("
+        f"{marker!r} + json.dumps({{'spectral_windows': _spectral_windows, "
+        "'field_names': _field_names, 'state_modes': _state_modes, "
+        "'data_description_spws': _data_description_spws, "
+        "'main_rows': sorted(_main_rows)}))\n"
     )
     result = subprocess.run(
         [casa_executable, "--nogui", "-c", casa_code],
@@ -686,10 +955,19 @@ def read_spectral_windows_with_casa(ms_path, casa_executable):
             + (f" CASA output: {detail}" if detail else "")
         )
     try:
-        return [
+        metadata = json.loads(match.group(1))
+        spectral_windows = [
             (int(spw_id), str(name), float(frequency_hz))
-            for spw_id, name, frequency_hz in json.loads(match.group(1))
+            for spw_id, name, frequency_hz in metadata["spectral_windows"]
         ]
+        target_spw_ids = resolve_target_spw_ids(
+            metadata["field_names"],
+            metadata["main_rows"],
+            metadata["state_modes"],
+            metadata["data_description_spws"],
+            target_name,
+        )
+        return spectral_windows, target_spw_ids
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"CASA returned invalid spectral-window metadata: {exc}") from exc
 
@@ -707,6 +985,7 @@ def main():
                 use_single_band=args.use_single_band,
                 single_band=args.single_band,
                 casa_executable=args.casa_executable,
+                target_name=args.target_name,
             )
         }
     else:
@@ -720,6 +999,8 @@ def main():
             "observation_date": obs_date,
         }
     if args.output_format == "json":
+        print(json.dumps(output))
+    elif args.include_image_options:
         print(json.dumps(output))
     else:
         print(project_code)

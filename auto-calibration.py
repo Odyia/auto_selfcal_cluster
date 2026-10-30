@@ -714,8 +714,53 @@ def patch_auto_image_output_directory(auto_image_dir: Path) -> None:
 def ensure_auto_image_selection_support(auto_image_dir: Path) -> None:
     helper_path = auto_image_dir / "helper_functions.py"
     run_path = auto_image_dir / "run-auto-image.py"
+    source_helper_path = Path(__file__).resolve().parent / "repo" / "auto-image-VLA" / "helper_functions.py"
     helper_text = helper_path.read_text(encoding="utf-8")
     run_text = run_path.read_text(encoding="utf-8")
+    source_helper_text = source_helper_path.read_text(encoding="utf-8")
+
+    source_start = source_helper_text.find("def target_spw_ids_for_field(")
+    if source_start < 0:
+        raise RuntimeError(
+            f"Target-aware auto-image SPW selection is missing from {source_helper_path}."
+        )
+    source_end = source_helper_text.find("def fit_point_source_basic(", source_start)
+    existing_start = helper_text.find("def target_spw_ids_for_field(")
+    if existing_start < 0:
+        existing_start = helper_text.find("def scrape_listfile(")
+    existing_end = helper_text.find("def fit_point_source_basic(", existing_start)
+    if source_end < 0 or existing_start < 0 or existing_end < 0:
+        raise RuntimeError(
+            f"Could not update target-aware SPW selection in {helper_path}."
+        )
+    helper_text = (
+        helper_text[:existing_start]
+        + source_helper_text[source_start:source_end]
+        + helper_text[existing_end:]
+    )
+    if "import re\n" not in helper_text:
+        helper_text = helper_text.replace("import os\n", "import os\nimport re\n", 1)
+
+    scrape_call = re.compile(
+        r"(?ms)^([ \t]*)df_store,\s*field\s*=\s*scrape_listfile\((?:[^()]|\([^()]*\))*\)"
+    )
+    scrape_match = scrape_call.search(run_text)
+    if not scrape_match:
+        raise RuntimeError(
+            f"Could not update the target-aware SPW call in {run_path}."
+        )
+    indent = scrape_match.group(1)
+    replacement = (
+        f"{indent}df_store, field = scrape_listfile(\n"
+        f"{indent}    listfile,\n"
+        f"{indent}    source_name,\n"
+        f"{indent}    split,\n"
+        f"{indent}    use_single_band,\n"
+        f"{indent}    single_band,\n"
+        f"{indent}    measurement_set,\n"
+        f"{indent})"
+    )
+    run_text = scrape_call.sub(lambda _: replacement, run_text, count=1)
 
     filter_function = '''
 def filter_image_options(df_store, selected_images):
@@ -755,7 +800,7 @@ def filter_image_options(df_store, selected_images):
     filter_call = "df_store = filter_image_options(df_store, selected_images)"
     if filter_call not in run_text:
         listfile_scrape = re.compile(
-            r"(?m)^(\s*)df_store,\s*field\s*=\s*scrape_listfile\([^\n]*\)\s*$"
+            r"(?ms)^([ \t]*)df_store,\s*field\s*=\s*scrape_listfile\((?:[^()]|\([^()]*\))*\)"
         )
         match = listfile_scrape.search(run_text)
         if not match:
@@ -819,6 +864,7 @@ def read_auto_image_image_options(
     use_single_band: bool,
     single_band: str,
     casa_executable: str,
+    target_name: Optional[str] = None,
 ) -> list:
     metadata_script = script_dir / "runtime" / "metadata-scraper-ASC.py"
     if not metadata_script.exists():
@@ -836,6 +882,8 @@ def read_auto_image_image_options(
     ]
     if use_single_band:
         command.extend(["--use-single-band", "--single-band", single_band])
+    if target_name:
+        command.extend(["--target-name", target_name])
     command.extend(["--casa-executable", casa_executable])
     result = subprocess.run(
         command,
@@ -1355,6 +1403,7 @@ def run_auto_image_workflow(args: argparse.Namespace, source_url: Optional[str] 
                 configured_use_single_band,
                 configured_single_band,
                 args.auto_image_casa_executable,
+                read_auto_image_config_value(config_path, "source_name", ""),
             )
         )
         update_auto_image_selection(config_path, selected_images)

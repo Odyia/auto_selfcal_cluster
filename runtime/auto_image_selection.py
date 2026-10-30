@@ -41,13 +41,19 @@ def build_image_options(
     split: str,
     use_single_band: bool = False,
     single_band: Optional[str] = None,
+    target_spw_ids: Optional[Iterable[int]] = None,
 ) -> List[dict]:
     windows = list(spectral_windows)
     if split not in {"whole", "halves", "both"}:
         raise ValueError(f"Unsupported auto-image split value: {split}")
 
     bands: Dict[str, List[Tuple[int, float]]] = {}
-    windows_to_use = windows if use_single_band else windows[2:]
+    target_ids = None if target_spw_ids is None else {int(spw_id) for spw_id in target_spw_ids}
+    windows_to_use = (
+        windows
+        if target_ids is None
+        else [window for window in windows if int(window[0]) in target_ids]
+    )
     for spw_id, name, frequency_hz in windows_to_use:
         band = band_for_frequency(frequency_hz, name)
         if use_single_band and band != single_band:
@@ -57,6 +63,7 @@ def build_image_options(
 
     options = []
     for band, band_windows in bands.items():
+        band_windows.sort(key=lambda window: (window[1], window[0]))
         count = len(band_windows)
         lower = band_windows[: count // 2]
         upper = band_windows[count // 2 :]
@@ -75,7 +82,7 @@ def build_image_options(
                     "band": band,
                     "split": group_name,
                     "frequency_ghz": round(sum(frequencies) / len(frequencies), 2),
-                    "spws": f"{min(spw_ids)}~{max(spw_ids)}",
+                    "spws": ",".join(str(spw_id) for spw_id in sorted(spw_ids)),
                 }
             )
 

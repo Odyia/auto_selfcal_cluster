@@ -529,7 +529,11 @@ def stage_observation_contents(
     return observation_name
 
 
-def read_sdm_bdf_image_options(source_path: Path, split: str) -> List[dict]:
+def read_sdm_bdf_image_options(
+    source_path: Path,
+    split: str,
+    target_name: Optional[str] = None,
+) -> List[dict]:
     metadata_script = Path(__file__).resolve().with_name("metadata-scraper-CB.py")
     command = [
         sys.executable,
@@ -541,6 +545,8 @@ def read_sdm_bdf_image_options(source_path: Path, split: str) -> List[dict]:
         "--split",
         split,
     ]
+    if target_name:
+        command.extend(["--target-name", target_name])
     result = subprocess.run(
         command,
         cwd=metadata_script.parent,
@@ -638,6 +644,7 @@ def main() -> None:
                 read_sdm_bdf_image_options(
                     workdir_path / observation_subdir_name,
                     args.auto_image_split,
+                    args.object_name,
                 )
             )
         except (FileNotFoundError, RuntimeError, ValueError) as exc:

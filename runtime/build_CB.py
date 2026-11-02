@@ -538,7 +538,7 @@ def read_sdm_bdf_image_options(
     command = [
         sys.executable,
         str(metadata_script),
-        str(source_path),
+        str(source_path.resolve()),
         "--output-format",
         "json",
         "--include-image-options",

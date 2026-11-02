@@ -562,6 +562,8 @@ def read_sdm_bdf_image_options(
         metadata = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Invalid output from SDM-BDF metadata scraper: {exc}") from exc
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
     return metadata.get("image_options", [])
 
 

@@ -2,6 +2,7 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -729,11 +730,12 @@ def resolve_target_spw_ids(field_names, main_rows, state_modes, data_description
     matching_fields = set()
     if target_name:
         normalized_target = _normalize_target_name(target_name)
-        matching_fields = {
-            field_id
-            for field_id, name in enumerate(field_names)
-            if _normalize_target_name(name) == normalized_target
-        }
+        if normalized_target:
+            matching_fields = {
+                field_id
+                for field_id, name in enumerate(field_names)
+                if _normalize_target_name(name) == normalized_target
+            }
 
     if target_state_ids:
         if matching_fields:
@@ -747,21 +749,33 @@ def resolve_target_spw_ids(field_names, main_rows, state_modes, data_description
                     f"Configured auto-image source {target_name!r} does not match a target-intent field. "
                     f"Target fields: {', '.join(target_field_names)}."
                 )
-        elif len(target_fields) == 1:
-            selected_fields = target_fields
         elif target_name:
+            target_field_names = [
+                str(field_names[field_id]) if 0 <= field_id < len(field_names) else str(field_id)
+                for field_id in sorted(target_fields)
+            ]
             raise RuntimeError(
                 f"Could not match auto-image source {target_name!r} to a target-intent field. "
-                f"Target fields: {', '.join(str(field_names[field_id]) for field_id in sorted(target_fields))}."
+                f"Target fields: {', '.join(target_field_names)}."
             )
-        else:
+        elif len(target_fields) == 1:
             selected_fields = target_fields
+        else:
+            target_field_names = [
+                str(field_names[field_id]) if 0 <= field_id < len(field_names) else str(field_id)
+                for field_id in sorted(target_fields)
+            ]
+            raise RuntimeError(
+                "Multiple target-intent fields were found. Specify the auto-image source name "
+                f"to select one: {', '.join(target_field_names)}."
+            )
         image_rows = [row for row in target_rows if row[0] in selected_fields]
     else:
         if not matching_fields:
             raise RuntimeError(
-                "The Measurement Set has no target-intent metadata. Provide a source name that exactly "
-                "matches a FIELD.NAME entry so its spectral windows can be identified safely."
+                "The Measurement Set has no target-intent metadata. Provide a source name that matches "
+                "a FIELD.NAME entry after case and punctuation normalization so its spectral windows "
+                "can be identified safely."
             )
         image_rows = [row for row in rows if row[0] in matching_fields]
 
@@ -775,6 +789,38 @@ def resolve_target_spw_ids(field_names, main_rows, state_modes, data_description
         raise RuntimeError(
             "Could not associate any spectral windows with the selected target field and target scans."
         )
+    target_field_names = [
+        f"{field_names[field_id]} (FIELD {field_id})"
+        if 0 <= field_id < len(field_names)
+        else f"FIELD {field_id}"
+        for field_id in sorted(target_fields)
+    ]
+    selected_field_names = [
+        f"{field_names[field_id]} (FIELD {field_id})"
+        if 0 <= field_id < len(field_names)
+        else f"FIELD {field_id}"
+        for field_id in sorted(selected_fields if target_state_ids else matching_fields)
+    ]
+    configured_name = repr(target_name) if target_name else "not specified"
+    found_label = (
+        "target-intent fields found"
+        if target_state_ids
+        else "fields matched without target-intent metadata"
+    )
+    selection_basis = (
+        "target-intent scans"
+        if target_state_ids
+        else "FIELD.NAME match; target-intent metadata unavailable"
+    )
+    print(
+        "Auto-image target cross-check: "
+        f"configured object={configured_name}; "
+        f"{found_label}={', '.join(target_field_names) or 'none'}; "
+        f"selected field(s)={', '.join(selected_field_names) or 'none'}; "
+        f"basis={selection_basis}; "
+        f"SPW IDs selected={sorted(target_spw_ids)}.",
+        file=sys.stderr,
+    )
     return target_spw_ids
 
 

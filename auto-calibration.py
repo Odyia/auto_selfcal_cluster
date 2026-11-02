@@ -902,6 +902,8 @@ def read_auto_image_image_options(
     except ValueError as exc:
         sys.exit(f"Error: invalid output from ASC metadata scraper: {exc}")
 
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
     return metadata.get("image_options", [])
 
 

@@ -1,6 +1,7 @@
 import argparse
 import json
 import re
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -217,13 +218,13 @@ def extract_target_spectral_window_ids(root, target_name=None):
         for scan in target_scans
         if scan["source_name"]
     }
+    found_target_sources = sorted(target_sources.values())
     if target_name:
         normalized_target = normalize_source_name(target_name)
         if normalized_target not in target_sources:
-            available = sorted(target_sources.values())
             raise RuntimeError(
                 f"Could not match target source {target_name!r} to an SDM-BDF target scan. "
-                f"Target scan sources: {', '.join(available) or 'none'}."
+                f"Target scan sources: {', '.join(found_target_sources) or 'none'}."
             )
         target_sources = {normalized_target: target_sources[normalized_target]}
     elif len(target_sources) > 1:
@@ -301,6 +302,15 @@ def extract_target_spectral_window_ids(root, target_name=None):
             "Could not map target-intent scans to spectral windows in the SDM-BDF metadata. "
             "Refusing to infer setup windows from SPW ordering."
         )
+    configured_name = repr(target_name) if target_name else "not specified"
+    print(
+        "Auto-image target cross-check: "
+        f"configured object={configured_name}; "
+        f"target sources found={', '.join(found_target_sources)}; "
+        f"selected source(s)={', '.join(sorted(target_sources.values()))}; "
+        f"ASDM SPW IDs selected={sorted(target_spw_ids)}.",
+        file=sys.stderr,
+    )
     return target_spw_ids
 
 
@@ -483,6 +493,10 @@ def extract_sdm_bdf_image_options(root, split="both", target_name=None):
         raise RuntimeError(
             "Target scans were identified, but none of their spectral windows have valid frequency metadata."
         )
+    print(
+        f"Auto-image SPW mapping: usable Measurement Set SPW IDs={sorted(target_spw_ids)}.",
+        file=sys.stderr,
+    )
     return build_image_options(
         spectral_windows,
         split,

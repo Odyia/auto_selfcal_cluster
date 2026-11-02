@@ -235,8 +235,7 @@ def extract_target_spectral_window_ids(root, target_name=None):
 
     selected_source_names = set(target_sources)
     scans = [
-        scan
-        for scan in all_scans
+        scan for scan in target_scans
         if normalize_source_name(scan["source_name"]) in selected_source_names
     ]
 
@@ -253,14 +252,33 @@ def extract_target_spectral_window_ids(root, target_name=None):
     main_file = find_xml_file(root, "Main.xml")
     target_data_description_ids = set()
     if main_file is not None:
+        main_rows = []
         for row in iter_xml_rows(main_file):
             scan_number = parse_asdm_scan_number(child_text(row, "scanNumber"))
             if scan_number is None:
                 continue
-            scan_key = (child_text(row, "execBlockId"), scan_number)
+            main_rows.append(
+                (
+                    child_text(row, "execBlockId"),
+                    scan_number,
+                    parse_asdm_ids(child_text(row, "dataDescriptionId")),
+                )
+            )
+
+        for exec_block_id, scan_number, data_description_ids in main_rows:
+            scan_key = (exec_block_id, scan_number)
             if scan_key in target_scan_keys:
+                target_data_description_ids.update(data_description_ids)
+
+        if not target_data_description_ids:
+            target_exec_block_ids = {scan["exec_block_id"] for scan in scans}
+            if len(target_exec_block_ids) == 1:
+                target_scan_numbers = {scan["scan_number"] for scan in scans}
                 target_data_description_ids.update(
-                    parse_asdm_ids(child_text(row, "dataDescriptionId"))
+                    data_description_id
+                    for _, scan_number, data_description_ids in main_rows
+                    if scan_number in target_scan_numbers
+                    for data_description_id in data_description_ids
                 )
 
     data_description_to_spw = {}
@@ -300,7 +318,9 @@ def extract_target_spectral_window_ids(root, target_name=None):
     if not target_spw_ids:
         raise RuntimeError(
             "Could not map target-intent scans to spectral windows in the SDM-BDF metadata. "
-            "Refusing to infer setup windows from SPW ordering."
+            f"Matched target scans={len(scans)}, Main data-description IDs="
+            f"{len(target_data_description_ids)}, DataDescription mappings="
+            f"{len(data_description_to_spw)}. Refusing to infer setup windows from SPW ordering."
         )
     configured_name = repr(target_name) if target_name else "not specified"
     print(

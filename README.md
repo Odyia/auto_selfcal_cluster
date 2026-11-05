@@ -192,10 +192,10 @@ rsync -avz --include='ASC.*/' --include='ASC.*/images/***' --include='ASC.*/fina
 This command assumes that you just have the repo in the main directory of your node. But it will pull all the sperate CB directories image and imfit directoies while keeping them organized like how they are in the cluster.
 
 ## Logs
-Before/after runs, metadata snapshots and Slurm .out/.err artifacts are moved/grouped under logs. If something breaks or crashes, check those files first. The scripts are set up to throw useful setup/runtime errors, but they will not catch everything. You can use the flag -v when running to turn on verbose logging, if you need to get more out of the logs.
+Before/after runs, metadata snapshots and Slurm .out/.err artifacts are moved/grouped under logs. If something breaks or crashes, check those files first. The scripts are set up to throw useful setup/runtime errors, but they will not catch everything. You can use the flag -v when running to turn on verbose logging if you need to get more out of the logs.
 You shouldn't need to look at any of the metadata logs as they are just generated as temp files for the metadata scrapers for naming the working directories.
 
-If something breaks, it's also a good idea to run `git pull` to make sure you are on the latest version and try again.
+If something breaks, it's also a good idea to run `git pull` to make sure you are on the latest version and try again. Since it uses git submodules you'll also need to make sure the those are up to date whenever you pull aswell with `git submodule update --init --recursive`.
 
 ## Flags
 If you need to change from or see the default of all the setting for flags here they are. 

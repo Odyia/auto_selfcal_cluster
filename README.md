@@ -58,7 +58,7 @@ From the repository root, you can optionally install the Python package in edita
 python -m pip install -e .
 ```
 
-This adds the `vvisor` command and enables `python -m vvisor`. Run either from the repository checkout so the workflow scripts, templates, and submodules are available. Installing the package does not replace the external CASA or Slurm environment required by the pipelines. The previous `auto-calibration` command remains available as a compatibility alias.
+Packaging metadata is provided in both `pyproject.toml` and `setup.py` for compatibility with older cluster install tools. This adds the `vvisor` command and enables `python -m vvisor`. Run either from the repository checkout so the workflow scripts, templates, and submodules are available. Installing the package does not replace the external CASA or Slurm environment required by the pipelines. The previous `auto-calibration` command remains available as a compatibility alias.
 
 The canonical script entry point is:
 ```

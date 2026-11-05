@@ -10,3 +10,10 @@ slurm-mail.conf
 
 # Generated Python cache files
 runtime/__pycache__/
+__pycache__/
+*.py[cod]
+
+# Python package build artifacts
+build/
+dist/
+*.egg-info/

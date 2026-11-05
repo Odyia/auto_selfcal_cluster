@@ -1,12 +1,16 @@
-# RUNNING INITIAL CALIBRATION OR AUTO SELF-CALIBRATION
+# vvisor
+
+**VLA-VISibility Optimization and Self-cal Orchestration Runner**
+
+## Running initial calibration or auto self-calibration
 Many of the initial Auto-Selfcal scripts are forked from the work done by Jimmy Lynch (https://github.com/jlynch2195/auto_selfcal_cluster), and this repo uses our auto-image-VLA fork (https://github.com/Odyia/auto-image-VLA) as a submodule. The fork is based on Jimmy's original auto-image-VLA (https://github.com/jlynch2195/auto-image-VLA). As Jimmy mentions in his README, this also uses the auto_selfcal code developed by Patrick Sheehan and his team (https://github.com/psheehan/auto_selfcal), so full credit goes to them for the basis of the ASC pipeline of this project. Unlike Jimmy's original project, Patrick Sheehan's work is installed here as a submodule, so no extra installation step is needed. This project also makes use of the CASA calibration pipeline script supplied by NRAO.
 
 This repo is set up as an automation wrapper around their code, with the use case of the NRAO cluster and Talapas specifically in mind.
 
 My main use case has been on the NRAO cluster. Read through Jimmy's repo to get an idea of how to request access and make basic use of the cluster. He also comments on best use cases and how his scripts make use of Patrick Sheehan's work. I recommend reading Jimmy's README before this one since I skip many of the points he already covers. If this README has drifted from Jimmy's, his original one is still inside the ASC directory.
 
-## Making use of auto-calibration
-The main wrapper you should use is auto-calibration.py in the top-level directory. It calls scripts/wrappers in the ASC, CB, and runtime directories. It handles downloading, setting up a working directory, preparing data, and submitting Slurm jobs. It also deals with infering information about the dataset given to properly name the working directory.
+## Using vvisor
+The main wrapper is `vvisor.py` in the top-level directory. It calls scripts/wrappers in the ASC, CB, and runtime directories. It handles downloading, setting up a working directory, preparing data, and submitting Slurm jobs. It also deals with infering information about the dataset given to properly name the working directory.
 
 It can handle:
 - SDM-BDF datasets for initial calibration (CB) to create an .ms directory
@@ -15,7 +19,7 @@ It can handle:
 - Standalone auto-image runs
 - Infers: Project Code, Object name and Observation data
 
-auto-calibration has a lot of flags and parameters for customization. Leave them at defaults unless you know exactly what you want to change, but they are also listed at the bottem of the page for reference.
+vvisor has a lot of flags and parameters for customization. Leave them at defaults unless you know exactly what you want to change, but they are also listed at the bottem of the page for reference.
 
 # Setup
 Since I have mostly run this project on the cluster, that is what I default to here.
@@ -36,9 +40,9 @@ You need to do this any time you run auto-calibration or related scripts on the 
 
 Run `squeue -l --me` to see which node was assigned, then use `ssh nmpostXXX` to move to it.
 
-Go to your main directory with `cd`, then clone the repo:
+Go to your main directory with `cd`, then clone the repo into a local `vvisor` directory (the URL uses the repository's current GitHub name):
 ```
-git clone --recurse-submodules https://github.com/Odyia/auto_selfcal_cluster
+git clone --recurse-submodules https://github.com/Odyia/auto_selfcal_cluster vvisor
 ```
 
 If you already cloned it without submodules, run:
@@ -48,15 +52,32 @@ git submodule update --init --recursive
 
 You may need to `cd` into the repo before running the submodule install.
 
+#### Optional Python package install
+From the repository root, you can optionally install the Python package in editable mode:
+```
+python -m pip install -e .
+```
+
+This adds the `vvisor` command and enables `python -m vvisor`. Run either from the repository checkout so the workflow scripts, templates, and submodules are available. Installing the package does not replace the external CASA or Slurm environment required by the pipelines. The previous `auto-calibration` command remains available as a compatibility alias.
+
+The canonical script entry point is:
+```
+python vvisor.py --help
+```
+The previous script name remains available for existing workflows:
+```
+python auto-calibration.py --help
+```
+
 #### Email Notifications
 It also has the capability of email notifications, so that you can be notified when for exmaple a job starts, ends or fails. In the main directory you should find `slurm-mail.conf`. You can edit it using nano (Jimmy has a good breakdown of how to use it) setting the mail type and the specific address that you want the mail to go to. You can set it to only give you when it completes and when it fails as it is set my default, or you can add more such as for when it starts a job. No worries if you don't want to set this up it'll just skip it when running if it doesn't find anything.
 When Running ASC it will tend to spam your inbox a bit since all of the bands are set as a bunch of sperate jobs, especially with multi-band observations.
 
 ## Contents
-As mentioned above, you should mainly use the auto-calibration wrapper. The main wrapper scripts are in runtime, while CB/ASC specific scripts are in their respective directories. The logs directory collects Slurm and metadata outputs to keep the main directory cleaner, and submodules are stored in repo.
+As mentioned above, you should mainly use the vvisor wrapper. The main wrapper scripts are in runtime, while CB/ASC specific scripts are in their respective directories. The logs directory collects Slurm and metadata outputs to keep the main directory cleaner, and submodules are stored in repo.
 
 ## Requesting Data
-You can run this using local data (covered below), but most commonly you will run auto-calibration with a URL from the NRAO archive: https://data.nrao.edu/portal/#/
+You can run this using local data (covered below), but most commonly you will run vvisor with a URL from the NRAO archive: https://data.nrao.edu/portal/#/
 
 Make sure you are logged in with your NRAO account so you can access your data. Depending on pipeline:
 - CB expects SDM-BDF style source data
@@ -64,8 +85,8 @@ Make sure you are logged in with your NRAO account so you can access your data. 
 
 NRAO will process your request and email you a link to the directory. This link to the directory is the url that you'll use to run commands
 
-# Running auto-calibration
-After requesting data and receiving the link, you can run auto-calibration.
+# Running vvisor
+After requesting data and receiving the link, you can run vvisor.
 
 IMPORTANT:
 ASC can create many Slurm jobs, and A-config runs can take around 7-10 days. With common settings (split=both across multiple bands), you can see around 12 frequency jobs plus one cleanup job. Do not run multiple heavy ASC datasets at once, as resoucres are limited. It's a good rule of thumb to only be running ONE ASC job at a time.
@@ -73,72 +94,72 @@ ASC can create many Slurm jobs, and A-config runs can take around 7-10 days. Wit
 CB typically submits two chained jobs (calibration, then auto-image) when auto-image is available, and it is usually done within a day.
 
 To run, enter the directory:
-`cd auto_selfcal_cluster/`
+`cd vvisor/`
 
 ### Running CB
 For CB:
 ```
-python auto-calibration.py --pipeline cb --url 'your-link-goes-here'
+python vvisor.py --pipeline cb --url 'your-link-goes-here'
 ```
 If the dataset is missidentified as a ASC and rather than CB/SDM-BDF then you can override this check with `--allow-url-type-mismatch`. This only applies for url inputs. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
 
 
 If your SDM-BDF source is local:
 ```
-python auto-calibration.py --pipeline cb --cb-local-dataset '/path/to/local/SDM-BDF-or-observation-dir'
+python vvisor.py --pipeline cb --cb-local-dataset '/path/to/local/SDM-BDF-or-observation-dir'
 ```
 
 Only use --skip-cb if you already have a prepared CB working directory and want to reuse it without rebuilding:
 ```
-python auto-calibration.py --pipeline cb --cb-workdir 'path-to-directory' --skip-cb
+python vvisor.py --pipeline cb --cb-workdir 'path-to-directory' --skip-cb
 ```
 ### Running auto-image
 After CB calibration is submitted, the pipeline will chain auto-image automatically. Depending on the size you set (default is 512px) it can take awhile to run. You can change the image size with `--auto-image-size`. This can be done during the CB pipeline when you are doing initial calibration or when running the auto-image pipeline, since this is the most likely reason for rerunning auto-image. I suggest running the SLURM job version since the image is likely to be large and could take a while, with `--auto-image-submit` but you need to be on a sbatch compute node for it to be submitted. You can also run auto-image manually on an existing .ms path without SLURM:
 ```
-python auto-calibration.py --pipeline auto-image --asc-ms-path 'path-to-directory'
+python vvisor.py --pipeline auto-image --asc-ms-path 'path-to-directory'
 ```
 You can run auto-image from a url that has a `.ms` directory (won't run on uncalibrated data), this will create a ASC directory then run auto-image on it.
 ```
-python auto-calibration.py --pipeline auto-image --url 'your-link-goes-here'
+python vvisor.py --pipeline auto-image --url 'your-link-goes-here'
 ```
 CB observation/SDM-BDF URLs are not valid auto-image inputs; use `--pipeline cb` to calibrate those into a measurement set first. If URL scanning misclassifies a source or fails for any pipeline, retry with `--allow-url-type-mismatch`. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`).
 
 Add `--auto-image-submit` to submit imaging through Slurm. For standalone URL or local-MS runs, the wrapper creates `run_auto_image.sh` in the generated workdir; existing CB workdirs reuse their script or get one generated if missing:
 ```
-python auto-calibration.py --pipeline auto-image --url 'your-link-goes-here' --auto-image-submit
+python vvisor.py --pipeline auto-image --url 'your-link-goes-here' --auto-image-submit
 ```
 For an existing CB workdir:
 ```
-python auto-calibration.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-submit
+python vvisor.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-submit
 ```
 Add `--auto-image-select` to inspect the available Measurement Set or SDM-BDF metadata and interactively choose image products before running or submitting. The menu lists bands/frequency groups associated with target-intent scans and respects `--auto-image-split`; select one or more numbered products, or `all`. For CB/SDM-BDF, a matching target-intent scan establishes the target object, then scans for that exact object name—including setup or calibration-intent scans—can contribute SPWs; selection stops if the requested name does not match or multiple target objects are ambiguous. SPWs are identified through target field/scan-to-data-description metadata, not by assuming particular SPW numbers; an SPW used by the target is retained even if it is also used for calibration. The selected products are rebuilt from the Measurement Set's target-field SPWs at run time, with exact SPW IDs passed to CASA. For a Measurement Set, metadata is read using casacore/pyrap when available, or through the configured CASA executable (`--auto-image-casa-executable`) otherwise. If intent metadata is unavailable, the source name must match a Measurement Set `FIELD.NAME` entry to avoid guessing which SPWs are science data. For CB, the selection is stored in the generated auto-image config before the calibration jobs are submitted, so the later Slurm auto-image job does not need an interactive terminal. For standalone auto-image, the wrapper checks the Measurement Set before launching CASA or submitting its Slurm job.
 ```
-python auto-calibration.py --pipeline cb --url 'your-link-goes-here' --auto-image-select
-python auto-calibration.py --pipeline auto-image --asc-ms-path 'path-to-directory' --auto-image-select --auto-image-submit
+python vvisor.py --pipeline cb --url 'your-link-goes-here' --auto-image-select
+python vvisor.py --pipeline auto-image --asc-ms-path 'path-to-directory' --auto-image-select --auto-image-submit
 ```
 All images will be put in a folder in the given CB/ASC directory called images and then sorted by the size of the image. Whenever you run auto-image it'll also generate an imfitresults.csv for the set on images generated. That can be found in the imfitresults folder along side the images folder.
 
 ### Running ASC
 For ASC:
 ```
-python auto-calibration.py --pipeline asc --url 'your-link-goes-here'
+python vvisor.py --pipeline asc --url 'your-link-goes-here'
 ```
 
 If it is ASC on A-config, use --a-config. This adjusts L/S band resources to reduce memory-related crashes, but those bands can still fail on difficult datasets.
 ```
-python auto-calibration.py --pipeline asc --url 'your-link-goes-here' --a-config
+python vvisor.py --pipeline asc --url 'your-link-goes-here' --a-config
 ```
 If the dataset is missidentified as a CB/SDM-BDF and rather than ASC then you can override this check with `--allow-url-type-mismatch`. This only applies for url inputs. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
 
 If you already ran CB and now want ASC, point to the directory instead of giving a URL. This also works for running ASC on any local .ms:
 ```
-python auto-calibration.py --pipeline asc --asc-ms-path 'path-to-directory'
+python vvisor.py --pipeline asc --asc-ms-path 'path-to-directory'
 ```
 
 ### Running CB-ASC
 You can chain CB then ASC on the same dataset. Supply an SDM-BDF source link (or other valid CB input):
 ```
-python auto-calibration.py --pipeline cb-asc --url 'your-link-goes-here'
+python vvisor.py --pipeline cb-asc --url 'your-link-goes-here'
 ```
 If the dataset is missidentified as a ASC and rather than CB/SDM-BDF then you can override this check with `--allow-url-type-mismatch`. This only applies for url inputs. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
 
@@ -174,7 +195,7 @@ Inside a completed ASC.* directory, final outputs are placed under final_files, 
 ### Getting it off the Cluster
 To copy data off the cluster, first find your path on the cluster with `pwd`. Then from a local terminal (not logged into cluster), run something like:
 ```
-scp -r nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/auto_selfcal_cluster/ASCorCB.directory/final_files/ ~/where/ever/you/want
+scp -r nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/vvisor/ASCorCB.directory/final_files/ ~/where/ever/you/want
 ```
 
 The first path is where the data is on the cluster, and the second path is where you want it locally.
@@ -184,10 +205,10 @@ Do keep in mind if you're using WSL for connecting to the cluster with windows. 
 If you need to pull lots of images with different resolutions across different directories or if you just want to retain the cluster file structure without having to set it up yourself for your personal storage.
 We can make use of rsync which has more more going on than scp. It can resume a stopped job if interupted, and be used to sync file structures.
 ```
-rsync -avz --include='CB.*/' --include='CB.*/images/***' --include='CB.*/imfit_results/***' --exclude='*' nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/auto_selfcal_cluster/ /where/you/want/it
+rsync -avz --include='CB.*/' --include='CB.*/images/***' --include='CB.*/imfit_results/***' --exclude='*' nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/vvisor/ /where/you/want/it
 ```
 ```
-rsync -avz --include='ASC.*/' --include='ASC.*/images/***' --include='ASC.*/final_files/***' --exclude='*' nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/auto_selfcal_cluster/ /where/you/want/it
+rsync -avz --include='ASC.*/' --include='ASC.*/images/***' --include='ASC.*/final_files/***' --exclude='*' nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/vvisor/ /where/you/want/it
 ```
 This command assumes that you just have the repo in the main directory of your node. But it will pull all the sperate CB directories image and imfit directoies while keeping them organized like how they are in the cluster.
 

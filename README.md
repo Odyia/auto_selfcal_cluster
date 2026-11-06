@@ -10,25 +10,26 @@ This repo is set up as an automation wrapper around their code, with the use cas
 My main use case has been on the NRAO cluster. Read through Jimmy's repo to get an idea of how to request access and make basic use of the cluster. He also comments on best use cases and how his scripts make use of Patrick Sheehan's work. I recommend reading Jimmy's README before this one since I skip many of the points he already covers. If this README has drifted from Jimmy's, his original one is still inside the ASC directory.
 
 ## Using vvisor
-The main wrapper is `vvisor.py` in the top-level directory. It calls scripts/wrappers in the ASC, CB, and runtime directories. It handles downloading, setting up a working directory, preparing data, and submitting Slurm jobs. It also deals with infering information about the dataset given to properly name the working directory.
+The main wrapper is `vvisor.py` in the top-level directory. It calls scripts/wrappers in the ASC, CB, and runtime directories. It handles downloading, setting up a working directory, preparing data, and submitting Slurm jobs. It also infers information about the dataset to name the working directory.
 
 It can handle:
-- SDM-BDF datasets for initial calibration (CB) to create an .ms directory
-- Auto-SelfCal (ASC) on an existing .ms directory
+- SDM-BDF datasets for initial calibration (CB), producing an `.ms` directory
+- Auto-SelfCal (ASC) on an existing `.ms` directory
 - Chaining CB directly into ASC
 - Standalone auto-image runs
-- Infers: Project Code, Object name and Observation data
 
-vvisor has a lot of flags and parameters for customization. Leave them at defaults unless you know exactly what you want to change, but they are also listed at the bottem of the page for reference.
+It also infers the project code, object name, and observation date.
+
+vvisor has many flags and parameters for customization. Leave them at their defaults unless you know exactly what you want to change; they are listed at the bottom of the page for reference.
 
 # Setup
 Since I have mostly run this project on the cluster, that is what I default to here.
 
 You need to request account access with NRAO to use the cluster. They will give you an nm member number that you use to log in.
-Then open your terminal and use `ssh nm-XXXXX@guest-login.aoc.nrao.edu` to log in with your NRAO account password. Jimmy breaks down better how to request account so check out his README for a better breakdown.
+Then open your terminal and use `ssh nm-XXXXX@guest-login.aoc.nrao.edu` to log in with your NRAO account password. Jimmy explains how to request an account in more detail, so check out his README for additional guidance.
 
-### OS consideration
-One important consideration is your OS.
+### OS considerations
+One important consideration is your operating system.
 - If you are using macOS, you should be fine since your terminal is already bash-friendly.
 - If you are using Linux, you are also fine.
 - If you are on Windows, use PuTTY or WSL. I prefer WSL, but either works. If you use WSL, use Ubuntu. Once PuTTY/WSL is set up, you should have a bash terminal.
@@ -49,7 +50,7 @@ If you already cloned it without submodules, run:
 ```
 git submodule update --init --recursive
 ```
-Whenever you `git pull` to update the repo it won't update the submodules so make sure to rerun this command so they also stay up to date with the main repo.
+Whenever you run `git pull` to update the repo, the submodules are not updated automatically. Rerun this command to update them as well.
 
 You may need to `cd` into the repo before running the submodule install.
 
@@ -71,8 +72,9 @@ python auto-calibration.py --help
 ```
 
 #### Email Notifications
-It also has the capability of email notifications, so that you can be notified when for exmaple a job starts, ends or fails. In the main directory you should find `slurm-mail.conf`. You can edit it using nano (Jimmy has a good breakdown of how to use it) setting the mail type and the specific address that you want the mail to go to. You can set it to only give you when it completes and when it fails as it is set my default, or you can add more such as for when it starts a job. No worries if you don't want to set this up it'll just skip it when running if it doesn't find anything.
-When Running ASC it will tend to spam your inbox a bit since all of the bands are set as a bunch of sperate jobs, especially with multi-band observations.
+It also supports email notifications when, for example, a job starts, ends, or fails. In the main directory, you should find `slurm-mail.conf`. Edit it with `nano` to set the mail type and destination address (Jimmy's README has more information). By default, notifications are sent when a job completes or fails; you can add other events, such as job start. If you do not want notifications, leave the file unset and they will be skipped.
+
+ASC may send frequent emails because each band is submitted as a separate job, especially for multi-band observations.
 
 ## Contents
 As mentioned above, you should mainly use the vvisor wrapper. The main wrapper scripts are in runtime, while CB/ASC specific scripts are in their respective directories. The logs directory collects Slurm and metadata outputs to keep the main directory cleaner, and submodules are stored in repo.
@@ -80,17 +82,16 @@ As mentioned above, you should mainly use the vvisor wrapper. The main wrapper s
 ## Requesting Data
 You can run this using local data (covered below), but most commonly you will run vvisor with a URL from the NRAO archive: https://data.nrao.edu/portal/#/
 
-Make sure you are logged in with your NRAO account so you can access your data. Depending on pipeline:
+Make sure you are logged in with your NRAO account so you can access your data. The required data depends on the pipeline:
 - CB expects SDM-BDF style source data
 - ASC expects a calibrated Measurement Set source (.ms), that can also be created locally by running the CB pipeline
 
-NRAO will process your request and email you a link to the directory. This link to the directory is the url that you'll use to run commands
+NRAO will process your request and email you a link to the directory. This directory link is the URL you will use to run commands.
 
 # Running vvisor
 After requesting data and receiving the link, you can run vvisor.
 
-IMPORTANT:
-ASC can create many Slurm jobs, and A-config runs can take around 7-10 days. With common settings (split=both across multiple bands), you can see around 12 frequency jobs plus one cleanup job. Do not run multiple heavy ASC datasets at once, as resoucres are limited. It's a good rule of thumb to only be running ONE ASC job at a time.
+**Important:** ASC can create many Slurm jobs, and A-configuration runs can take around 7-10 days. With common settings (`split=both` across multiple bands), you may see around 12 frequency jobs plus one cleanup job. Resources are limited, so avoid running multiple large ASC datasets at once. As a rule of thumb, run only one ASC dataset at a time.
 
 CB typically submits two chained jobs (calibration, then auto-image) when auto-image is available, and it is usually done within a day.
 
@@ -102,7 +103,7 @@ For CB:
 ```
 python vvisor.py --pipeline cb --url 'your-link-goes-here'
 ```
-If the dataset is missidentified as a ASC and rather than CB/SDM-BDF then you can override this check with `--allow-url-type-mismatch`. This only applies for url inputs. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
+If the dataset is misidentified as ASC rather than CB/SDM-BDF, you can override this check with `--allow-url-type-mismatch`. This applies only to URL inputs. Local paths bypass remote URL scanning but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
 
 
 If your SDM-BDF source is local:
@@ -110,7 +111,7 @@ If your SDM-BDF source is local:
 python vvisor.py --pipeline cb --cb-local-dataset '/path/to/local/SDM-BDF-or-observation-dir'
 ```
 
-Only use --skip-cb if you already have a prepared CB working directory and want to reuse it without rebuilding:
+Only use `--skip-cb` if you already have a prepared CB working directory and want to reuse it without rebuilding:
 ```
 python vvisor.py --pipeline cb --cb-workdir 'path-to-directory' --skip-cb
 ```
@@ -138,7 +139,7 @@ python vvisor.py --pipeline cb --url 'your-link-goes-here' --auto-image-select
 python vvisor.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-select --auto-image-submit
 ```
 The menu lists bands/frequency groups associated with target-intent scans and respects `--auto-image-split`; select one or more numbered products, or `all`. SPWs are resolved from target field/scan metadata rather than assumed numbers. For Measurement Sets, metadata is read using casacore/pyrap when available or through `--auto-image-casa-executable` otherwise.
-All images will be put in a folder in the given CB/ASC directory called images and then sorted by the size of the image. Whenever you run auto-image it'll also generate an imfitresults.csv for the set on images generated. That can be found in the imfitresults folder along side the images folder.
+Images are stored under `images/<image-size>/` in the CB work directory. When point-source fitting is enabled, results are written under `imfit_results/`; the CSV is created when `write_results` is enabled in the auto-image config.
 
 ### Running ASC
 For ASC:
@@ -147,13 +148,13 @@ python vvisor.py --pipeline asc --url 'your-link-goes-here'
 ```
 By default, ASC submits the CASA target/band-splitting prep as a Slurm job, so you do not need to wait for splitting on the interactive node. After prep completes, that job submits the self-calibration jobs. Use `--asc-interactive-splitting` to run the split prep on the current interactive node instead.
 
-If it is ASC on A-config, use --a-config. This adjusts L/S band resources to reduce memory-related crashes, but those bands can still fail on difficult datasets.
+For an A-configuration ASC run, use `--a-config`. This adjusts L/S-band resources to reduce memory-related crashes, but those bands can still fail on difficult datasets.
 ```
 python vvisor.py --pipeline asc --url 'your-link-goes-here' --a-config
 ```
-If the dataset is missidentified as a CB/SDM-BDF and rather than ASC then you can override this check with `--allow-url-type-mismatch`. This only applies for url inputs. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
+If the dataset is misidentified as CB/SDM-BDF rather than ASC, you can override this check with `--allow-url-type-mismatch`. This applies only to URL inputs. Local paths bypass remote URL scanning but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
 
-If you already ran CB and now want ASC, point to the directory instead of giving a URL. This also works for running ASC on any local .ms:
+If you already ran CB and now want ASC, point to the directory instead of giving a URL. This also works for running ASC on any local `.ms`:
 ```
 python vvisor.py --pipeline asc --asc-ms-path 'path-to-directory'
 ```
@@ -163,7 +164,7 @@ You can chain CB then ASC on the same dataset. Supply an SDM-BDF source link (or
 ```
 python vvisor.py --pipeline cb-asc --url 'your-link-goes-here'
 ```
-If the dataset is missidentified as a ASC and rather than CB/SDM-BDF then you can override this check with `--allow-url-type-mismatch`. This only applies for url inputs. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
+If the dataset is misidentified as ASC rather than CB/SDM-BDF, you can override this check with `--allow-url-type-mismatch`. This applies only to URL inputs. Local paths bypass remote URL scanning but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`). The selected pipeline still requires compatible data.
 
 
 ## In Progress (Check status)
@@ -186,10 +187,10 @@ sacct -u nm-XXXXX --format=NodeList,JobID,JobName%90,State,Start,End
 CB usually finishes within a day for most dataset sizes. ASC can take significantly longer depending on config and can run into memory issues for larger runs.
 
 ## Completed
-You will not receive a completion notification by default, so check job status to confirm completion or failure. If you setup the slurm-mail properly you should receive an email at the address you specified depending on the mail type you set.
+You will not receive a completion notification by default, so check the job status to confirm completion or failure. If you set up `slurm-mail.conf`, you should receive email at the address you specified, according to the configured mail type.
 
 #### CB
-Inside a completed CB.* directory, calibration should produce the .ms output. Auto-image outputs are produced by the follow-up auto-image-VLA job (when enabled) and include frequency images and fit result CSV outputs.
+Inside a completed CB.* directory, calibration should produce the `.ms` output. Auto-image outputs are produced by the follow-up auto-image-VLA job (when enabled) and include frequency images and, if configured, fit result CSV files.
 
 #### ASC
 Inside a completed ASC.* directory, final outputs are placed under final_files, including ASC images and fit CSV files. It is not uncommon for lower frequencies to fail; if expected files are missing, those splits likely did not complete.
@@ -201,39 +202,38 @@ scp -r nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/vvisor/A
 ```
 
 The first path is where the data is on the cluster, and the second path is where you want it locally.
-Do keep in mind if you're using WSL for connecting to the cluster with windows. Since that is just a Linux virtual machine the files that are moved will be store within that virtual machine rather than within your windows directories.
+If you use WSL to connect to the cluster from Windows, remember that WSL is a Linux virtual machine. Files copied this way will be stored in that virtual machine, not in your Windows directories.
 
 #### Mass pull off Cluster
-If you need to pull lots of images with different resolutions across different directories or if you just want to retain the cluster file structure without having to set it up yourself for your personal storage.
-We can make use of rsync which has more more going on than scp. It can resume a stopped job if interupted, and be used to sync file structures.
+If you need to pull many images with different resolutions from multiple directories, or want to retain the cluster file structure in your local storage, you can use `rsync`. It offers more features than `scp`: it can resume an interrupted transfer and synchronize directory structures.
 ```
 rsync -avz --include='CB.*/' --include='CB.*/images/***' --include='CB.*/imfit_results/***' --exclude='*' nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/vvisor/ /where/you/want/it
 ```
 ```
 rsync -avz --include='ASC.*/' --include='ASC.*/images/***' --include='ASC.*/final_files/***' --exclude='*' nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/vvisor/ /where/you/want/it
 ```
-This command assumes that you just have the repo in the main directory of your node. But it will pull all the sperate CB directories image and imfit directoies while keeping them organized like how they are in the cluster.
+These commands assume that the repository is in the main directory on your node. They pull the images and fit results from separate CB directories while preserving their organization.
 
 ## Logs
-Before/after runs, metadata snapshots and Slurm .out/.err artifacts are moved/grouped under logs. If something breaks or crashes, check those files first. The scripts are set up to throw useful setup/runtime errors, but they will not catch everything. You can use the flag -v when running to turn on verbose logging if you need to get more out of the logs.
-You shouldn't need to look at any of the metadata logs as they are just generated as temp files for the metadata scrapers for naming the working directories.
+Before and after runs, metadata snapshots and Slurm `.out`/`.err` artifacts are grouped under `logs`. If something breaks or crashes, check those files first. The scripts report useful setup and runtime errors, but they will not catch everything. Use `-v` for more detailed logging.
+You should not need to inspect the metadata logs; they are generated to help the metadata scrapers name the working directories.
 
-If something breaks, it's also a good idea to run `git pull` to make sure you are on the latest version and try again. Since it uses git submodules you'll also need to make sure the those are up to date whenever you pull aswell with `git submodule update --init --recursive`.
+If something breaks, try `git pull` to update to the latest version. Because the repository uses Git submodules, also run `git submodule update --init --recursive` after pulling.
 
 ## Flags
-If you need to change from or see the default of all the setting for flags here they are. 
+If you need to change a flag or check its default, the settings are listed here.
 
 
 ### General Flags
 
 `--project-code`
-Project code, e.g. 23A-241, used for overwriting metadata-scarper
+Project code, e.g. 23A-241, used to override metadata inference
     
 `--object-name`
-Object name, e.g. AT2019ehz, used for overwriting metadata-scarper
+Object name, e.g. AT2019ehz, used to override metadata inference
 
 `--observation-date`
-Observation date, e.g. 2023-07-22, used for overwriting metadata-scarper
+Observation date, e.g. 2023-07-22, used to override metadata inference
 
 `-v`
 `--verbose`
@@ -287,7 +287,7 @@ Seconds between Slurm status checks when --cb-asc-wait-for-cb is used
 Local extracted SDM-BDF dataset root for CB mode (use instead of --url)
 
 `--cb-workdir`
-Existing CB working directory to use instead of running build/prep"
+Existing CB working directory to use instead of running build/prep
 
 ### CB-ASC pipeline Flags, These are mostly for testing
 
@@ -345,7 +345,7 @@ CASA executable to use for standalone auto-image runs and, when `--auto-image-se
 ### ASC Flags
 
 `--asc-source-name`
-Source name to write into ASC prep script, use this to overwrite the metadata-scraper 
+Source name to write into the ASC prep script, overriding metadata inference
 
 `--asc-split-band`
 default = "both",
@@ -353,22 +353,22 @@ choices = ["whole", "halves", "both"],
 Split band strategy for ASC prep
 
 `--asc-use-single-band`
-Sets ASC prep to use only one frequency band, make sure to set the frequency band with `--asc-single-band`
+Restrict ASC prep to one frequency band; specify it with `--asc-single-band`
 
 `--asc-single-band`
 default = "EVLA_C",
-Single band to use when asc-use-single-band is set, make sure to set `--asc-use-single-band` otherwise this flag won't do anything since it defaults to run all bands
+Band to use when `--asc-use-single-band` is set. Without that flag, ASC runs all bands.
 
 `--asc-use-single-freq`
-Sets ASC prep to use only one frequency, make sure to set the frequency with `--asc-single-freq`
+Restrict ASC prep to one frequency; specify it with `--asc-single-freq`
 
 `--asc-single-freq`
 type = int,
 default = 9,
-Single frequency to use when asc-use-single-freq is set, make sure to set `--asc-use-single-freq` other this flag won't do anything since it defaults to run all frequencies
+Frequency index to use when `--asc-use-single-freq` is set. Without that flag, ASC runs all frequencies.
 
 `--a-config`
-Enable A_config in the ASC prep script, this mostly just set memory request to be higher with less cores for specifically lower frequencies to improve completion chance
+Enable `A_config` in the ASC prep script. This increases the memory request and reduces the core count for lower frequencies to improve the chance of completion.
 
 `--asc-auto-sc-dir`
 Optional auto_selfcal repository path for ASC prep instead of using internal repo of auto_selfcal
@@ -387,7 +387,7 @@ Run the CASA target/band-splitting prep on the current interactive node instead 
 Do not submit self-calibration jobs after CASA prep completes. By default, the splitting prep itself is still submitted to Slurm.
 
 `--asc-dry-run`
-Dry-run the ASC workflow without executing CASA or submission, outputs will instead will be printed
+Show the ASC commands without running CASA or submitting jobs
 
 `--asc-ms-path`
 Path to a local `.ms` directory or parent containing one for ASC mode. For auto-image, prefer `--auto-image-workdir` for a CB run; `--auto-image-ms-path` is the explicit standalone-workdir fallback (`--asc-ms-path` is also accepted there).

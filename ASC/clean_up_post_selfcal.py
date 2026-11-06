@@ -113,10 +113,7 @@ def create_imfitresults_csv(final_files_directory: Path, image_paths):
     results_df = pd.DataFrame(fit_results)
     output_path = final_files_directory / "imfitresults.csv"
     results_df.to_csv(output_path, index=False)
-
-    legacy_path = final_files_directory / "all_fit_results.csv"
-    results_df.to_csv(legacy_path, index=False)
-    print(f"Wrote imfit results to {output_path} and {legacy_path}.")
+    print(f"Wrote imfit results to {output_path}.")
     return output_path
 
 def get_frequencies_from_dirs(root_dir):
@@ -132,6 +129,29 @@ def get_frequencies_from_dirs(root_dir):
             if match:
                 freq_list.append(float(match.group(1)))
     return sorted(freq_list)
+
+
+def find_final_products(source_dir: Path, final_images_only: bool):
+    source_paths = list(source_dir.rglob("*"))
+    final_images = [
+        path
+        for path in source_paths
+        if re.search(r"_EVLA_[A-Z0-9]+_final\.image\.tt0$", path.name)
+        and (path.is_dir() or path.is_file())
+    ]
+    if final_images_only:
+        return final_images, final_images
+
+    final_image_bases = {path.name[: -len(".image.tt0")] for path in final_images}
+    final_files = [
+        path
+        for path in source_paths
+        if any(
+            path.name == image_base or path.name.startswith(f"{image_base}.")
+            for image_base in final_image_bases
+        )
+    ]
+    return final_files, final_images
 
 
 def parse_args():
@@ -182,21 +202,8 @@ if not root_dir.is_dir():
         "Please run the script from the observation root or pass the correct path."
     )
 
-# for an SED
-#frequencies = [1.26, 1.52, 1.75,
-#               2.5, 3.0, 3.5,
-#               5.0, 6.0, 7.0,
-#               9.0, 10.0, 11.0]
-bands = ["EVLA_L", "EVLA_L", "EVLA_L",
-         "EVLA_S", "EVLA_S", "EVLA_S",
-         "EVLA_C", "EVLA_C", "EVLA_C",
-         "EVLA_X", "EVLA_X", "EVLA_X"]
-
-# for a single frequency
-# frequencies = [6.0]
-# bands = ["EVLA_C"]
-
-# frequencies will be set dynamically
+# Frequencies are discovered dynamically because observations may cover only a subset
+# of bands, so their band cannot be inferred from their position in this list.
 frequencies = get_frequencies_from_dirs(root_dir)
 
 final_files_directory = f"{root_dir}/final_files"
@@ -204,23 +211,16 @@ os.makedirs(final_files_directory, exist_ok=True)
 
 list_of_mses = []
 collected_final_image_paths = []
-for i in range(len(frequencies)):
-
-    freq = frequencies[i]
-    band = bands[i]
+for freq in frequencies:
     
     working_directory = f"{root_dir}/{freq}GHz"
-    if final_images_only:
-        final_string = f"{band}_final.image.tt0"
-    else:
-        final_string = f"{band}_final"
     source_dir = Path(working_directory)
     destin_dir = Path(f"{final_files_directory}/{freq}GHz")
     destin_dir.mkdir(exist_ok=True)
 
-    final_files = [p for p in source_dir.rglob("*") if final_string in p.name]
+    final_files, final_images = find_final_products(source_dir, final_images_only)
 
-    print(f"Moving {len(final_files)} final files to {destin_dir}") 
+    print(f"Copying {len(final_files)} final files to {destin_dir}")
     def copy_tree_compat(src, dst):
         if dst.exists():
             if dst.is_file():
@@ -247,8 +247,8 @@ for i in range(len(frequencies)):
         print(f"Done applying calibrations for {freq}")
         os.chdir(root_dir)
 
-    original_ms = f"{working_directory}/{prefix_string}.{band}.{freq}GHz_target.ms"
-    list_of_mses.append(original_ms)
+    original_mses = sorted(source_dir.glob(f"*.{freq}GHz_target.ms"))
+    list_of_mses.extend(str(ms_path) for ms_path in original_mses)
 
 # concat into single ms
 if concat_final_ms:

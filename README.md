@@ -144,6 +144,7 @@ For ASC:
 ```
 python vvisor.py --pipeline asc --url 'your-link-goes-here'
 ```
+By default, ASC submits the CASA target/band-splitting prep as a Slurm job, so you do not need to wait for splitting on the interactive node. After prep completes, that job submits the self-calibration jobs. Use `--asc-interactive-splitting` to run the split prep on the current interactive node instead.
 
 If it is ASC on A-config, use --a-config. This adjusts L/S band resources to reduce memory-related crashes, but those bands can still fail on difficult datasets.
 ```
@@ -378,8 +379,11 @@ CASA executable to use when ASC launches CASA non-interactively
 `--asc-no-casa`
 Do not launch CASA for ASC prep; only patch the prep script, do not prepare to run
 
+`--asc-interactive-splitting`
+Run the CASA target/band-splitting prep on the current interactive node instead of submitting it to Slurm. By default, splitting is submitted as a Slurm job.
+
 `--asc-skip-submit`
-Do not submit ASC batch slurm jobs after CASA prep
+Do not submit self-calibration jobs after CASA prep completes. By default, the splitting prep itself is still submitted to Slurm.
 
 `--asc-dry-run`
 Dry-run the ASC workflow without executing CASA or submission, outputs will instead will be printed

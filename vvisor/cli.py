@@ -236,9 +236,17 @@ def parse_args():
         help="Patch the ASC prep script but do not launch CASA.",
     )
     parser.add_argument(
+        "--asc-interactive-splitting",
+        action="store_true",
+        help=(
+            "Run ASC CASA prep (target and band splitting) on the current interactive node "
+            "instead of submitting it to Slurm."
+        ),
+    )
+    parser.add_argument(
         "--asc-skip-submit",
         action="store_true",
-        help="Prepare ASC but do not submit its Slurm batch jobs.",
+        help="Do not submit self-calibration jobs after ASC prep completes.",
     )
     parser.add_argument(
         "--asc-dry-run",
@@ -273,6 +281,7 @@ def normalize_boolean_flag_values(inputs):
         "--asc-a-config": True,
         "--asc-no-casa": True,
         "--asc-skip-submit": True,
+        "--asc-interactive-splitting": True,
         "--asc-dry-run": True,
         "--dry-run": True,
     }
@@ -1638,6 +1647,8 @@ def build_asc_local_command(args: argparse.Namespace, ms_path: Path, script_dir:
         cmd.extend(["--auto_sc_dir", str(auto_sc_dir)])
     if args.asc_no_casa:
         cmd.append("--no-run-casa")
+    if args.asc_interactive_splitting:
+        cmd.append("--interactive-splitting")
     if args.asc_skip_submit:
         cmd.append("--skip-submit")
     if args.asc_dry_run or args.dry_run:
@@ -1738,6 +1749,8 @@ def run_asc_remote_workflow(
         cmd.extend(["--auto_sc_dir", args.asc_auto_sc_dir])
     if args.asc_no_casa:
         cmd.append("--no-run-casa")
+    if args.asc_interactive_splitting:
+        cmd.append("--interactive-splitting")
     if args.asc_skip_submit:
         cmd.append("--skip-submit")
     if args.asc_dry_run or args.dry_run:
@@ -1760,7 +1773,18 @@ def require_sbatch_for_submission(args: argparse.Namespace) -> None:
     submission_required = (
         (args.pipeline == "cb" and args.cb_submit)
         or (args.pipeline == "cb-asc" and not args.skip_cb)
-        or (args.pipeline == "asc" and not args.asc_skip_submit and not args.asc_dry_run)
+        or (
+            args.pipeline in {"asc", "cb-asc"}
+            and not args.asc_interactive_splitting
+            and not args.asc_no_casa
+            and not args.asc_dry_run
+        )
+        or (
+            args.pipeline in {"asc", "cb-asc"}
+            and not args.asc_skip_submit
+            and not args.asc_no_casa
+            and not args.asc_dry_run
+        )
         or (args.pipeline == "auto-image" and args.auto_image_submit)
     )
     if submission_required and shutil.which("sbatch") is None:
@@ -1785,7 +1809,6 @@ def main() -> None:
 
     if args.skip_cb and not args.cb_workdir:
         sys.exit("Error: --skip-cb requires --cb-workdir.")
-
     require_sbatch_for_submission(args)
 
     if source_url and is_remote_url(source_url):

@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -132,7 +133,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.set_defaults(run_casa=True)
 
-    parser.add_argument("--skip-submit", action="store_true", help="Skip submit_batch_of_batch_jobs.py")
+    parser.add_argument("--skip-submit", action="store_true", help="Skip submitting self-calibration batch jobs")
+    parser.add_argument(
+        "--interactive-splitting",
+        action="store_true",
+        help="Run CASA prep on the current interactive node instead of submitting it to Slurm",
+    )
     parser.add_argument("--casa-executable", default="casa", help="CASA executable")
     parser.add_argument("--dry-run", action="store_true", help="Show planned actions without executing")
     return parser.parse_args()
@@ -641,6 +647,7 @@ def launch_casa_and_exec_prep(
     casa_executable: str,
     workdir: Path,
     skip_submit: bool,
+    interactive_splitting: bool,
     quiet: bool,
     logger: logging.Logger,
 ) -> None:
@@ -651,6 +658,48 @@ def launch_casa_and_exec_prep(
         "-c",
         f"exec(open('{wrapper_script.name}').read())",
     ]
+    if not interactive_splitting:
+        submit_script = workdir / "submit_asc_split_prep.sh"
+        script_lines = [
+            "#!/bin/bash",
+            f"#SBATCH --job-name=asc_split_{_safe_slug(workdir.name)}",
+            "#SBATCH --output=asc_split_prep.%j.out",
+            "#SBATCH --error=asc_split_prep.%j.err",
+            f"#SBATCH --chdir={workdir.resolve()}",
+            "#SBATCH --time=2-00:00:00",
+            "#SBATCH --mem=64G",
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks-per-node=1",
+            "#SBATCH --export=ALL",
+            "",
+            "set -euo pipefail",
+            shlex.join(command),
+        ]
+        if not skip_submit:
+            script_lines.extend(
+                [
+                    "",
+                    shlex.join([sys.executable, "submit_batch_of_batch_jobs.py"]),
+                ]
+            )
+        submit_script.write_text("\n".join(script_lines) + "\n", encoding="utf-8")
+        result = run_checked(
+            ["sbatch", "--parsable", submit_script.name],
+            cwd=workdir,
+            capture_output=True,
+            logger=logger,
+            description=f"Submitting ASC split prep using {submit_script.name}",
+        )
+        if result.stderr and result.stderr.strip():
+            logger.warning("sbatch reported: %s", result.stderr.strip())
+        job_id = (result.stdout or "").strip().split(";", 1)[0]
+        if not job_id.isdigit():
+            raise RuntimeError(
+                f"Could not parse Slurm job ID from sbatch output: {(result.stdout or '').strip()!r}"
+            )
+        logger.info("Submitted ASC splitting/prep job %s: %s", job_id, submit_script)
+        return
+
     run_checked(
         command,
         cwd=workdir,
@@ -899,7 +948,14 @@ def patch_and_optionally_run(
     logger.info("Workdir ready: %s", workdir.resolve())
 
     if args.run_casa:
-        launch_casa_and_exec_prep(args.casa_executable, workdir, args.skip_submit, args.quiet, logger)
+        launch_casa_and_exec_prep(
+            args.casa_executable,
+            workdir,
+            args.skip_submit,
+            args.interactive_splitting,
+            args.quiet,
+            logger,
+        )
     else:
         logger.info("CASA launch skipped (--no-run-casa)")
 

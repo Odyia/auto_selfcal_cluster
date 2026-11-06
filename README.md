@@ -49,7 +49,7 @@ If you already cloned it without submodules, run:
 ```
 git submodule update --init --recursive
 ```
-Whenever you `git pull` to update the repo it won't update the submodules so more sure to rerun this command so they also stay up to date with the main repo.
+Whenever you `git pull` to update the repo it won't update the submodules so make sure to rerun this command so they also stay up to date with the main repo.
 
 You may need to `cd` into the repo before running the submodule install.
 

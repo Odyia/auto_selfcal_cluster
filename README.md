@@ -115,29 +115,29 @@ Only use --skip-cb if you already have a prepared CB working directory and want 
 python vvisor.py --pipeline cb --cb-workdir 'path-to-directory' --skip-cb
 ```
 ### Running auto-image
-After CB calibration is submitted, the pipeline will chain auto-image automatically. Depending on the size you set (default is 512px) it can take awhile to run. You can change the image size with `--auto-image-size`. This can be done during the CB pipeline when you are doing initial calibration or when running the auto-image pipeline, since this is the most likely reason for rerunning auto-image. I suggest running the SLURM job version since the image is likely to be large and could take a while, with `--auto-image-submit` but you need to be on a sbatch compute node for it to be submitted. You can also run auto-image manually on an existing .ms path without SLURM:
+After CB calibration is submitted, the pipeline chains auto-image automatically. To rerun imaging, change the image size, or select different products, reuse the existing CB work directory with `--auto-image-workdir`. This is the preferred approach: it uses the calibrated Measurement Set already in the CB directory and keeps the images and results with that run.
 ```
-python vvisor.py --pipeline auto-image --asc-ms-path 'path-to-directory'
+python vvisor.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-size 2700
 ```
-You can run auto-image from a url that has a `.ms` directory (won't run on uncalibrated data), this will create a ASC directory then run auto-image on it.
+For large images, add `--auto-image-submit` to submit imaging to Slurm. The CB work directory is still reused:
+```
+python vvisor.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-size 2700 --auto-image-submit
+```
+
+As a fallback for a standalone calibrated `.ms` that is not in a CB work directory, use `--auto-image-ms-path`. This bootstraps a separate `AUTO_IMAGE.*` work directory:
+```
+python vvisor.py --pipeline auto-image --auto-image-ms-path 'path-to-calibrated-ms' --auto-image-submit
+```
+You can also provide a URL containing a calibrated `.ms`; the wrapper stages it in a separate auto-image work directory. CB observation/SDM-BDF URLs are not valid auto-image inputs; use `--pipeline cb` to calibrate those first. If URL scanning misclassifies a source or fails, retry with `--allow-url-type-mismatch`.
 ```
 python vvisor.py --pipeline auto-image --url 'your-link-goes-here'
 ```
-CB observation/SDM-BDF URLs are not valid auto-image inputs; use `--pipeline cb` to calibrate those into a measurement set first. If URL scanning misclassifies a source or fails for any pipeline, retry with `--allow-url-type-mismatch`. Local paths already bypass remote URL scanning, but still need the required dataset structure (for example, an `.ms` or `ASDM.xml`).
-
-Add `--auto-image-submit` to submit imaging through Slurm. For standalone URL or local-MS runs, the wrapper creates `run_auto_image.sh` in the generated workdir; existing CB workdirs reuse their script or get one generated if missing:
-```
-python vvisor.py --pipeline auto-image --url 'your-link-goes-here' --auto-image-submit
-```
-For an existing CB workdir:
-```
-python vvisor.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-submit
-```
-Add `--auto-image-select` to inspect the available Measurement Set or SDM-BDF metadata and interactively choose image products before running or submitting. The menu lists bands/frequency groups associated with target-intent scans and respects `--auto-image-split`; select one or more numbered products, or `all`. For CB/SDM-BDF, a matching target-intent scan establishes the target object, then scans for that exact object name—including setup or calibration-intent scans—can contribute SPWs; selection stops if the requested name does not match or multiple target objects are ambiguous. SPWs are identified through target field/scan-to-data-description metadata, not by assuming particular SPW numbers; an SPW used by the target is retained even if it is also used for calibration. The selected products are rebuilt from the Measurement Set's target-field SPWs at run time, with exact SPW IDs passed to CASA. For a Measurement Set, metadata is read using casacore/pyrap when available, or through the configured CASA executable (`--auto-image-casa-executable`) otherwise. If intent metadata is unavailable, the source name must match a Measurement Set `FIELD.NAME` entry to avoid guessing which SPWs are science data. For CB, the selection is stored in the generated auto-image config before the calibration jobs are submitted, so the later Slurm auto-image job does not need an interactive terminal. For standalone auto-image, the wrapper checks the Measurement Set before launching CASA or submitting its Slurm job.
+Local paths bypass remote URL scanning, but still need the required dataset structure. Add `--auto-image-select` to inspect metadata and choose image products before running or submitting. For a CB work directory, the selection is stored in the auto-image config before the imaging job runs:
 ```
 python vvisor.py --pipeline cb --url 'your-link-goes-here' --auto-image-select
-python vvisor.py --pipeline auto-image --asc-ms-path 'path-to-directory' --auto-image-select --auto-image-submit
+python vvisor.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-select --auto-image-submit
 ```
+The menu lists bands/frequency groups associated with target-intent scans and respects `--auto-image-split`; select one or more numbered products, or `all`. SPWs are resolved from target field/scan metadata rather than assumed numbers. For Measurement Sets, metadata is read using casacore/pyrap when available or through `--auto-image-casa-executable` otherwise.
 All images will be put in a folder in the given CB/ASC directory called images and then sorted by the size of the image. Whenever you run auto-image it'll also generate an imfitresults.csv for the set on images generated. That can be found in the imfitresults folder along side the images folder.
 
 ### Running ASC
@@ -314,10 +314,10 @@ Optional SLURM account for dependency-submitted ASC follow-up job
 ### Auto-Image Flags
 
 `--auto-image-workdir`
-Existing working directory containing auto-image-VLA and config.yaml for standalone auto-image mode
+Preferred for reruns from an existing CB work directory; reuses its calibrated Measurement Set and stores auto-image outputs there. The work directory should contain `auto-image-VLA/config.yaml`.
 
 `--auto-image-ms-path`
-Path to a local .ms directory (or parent directory containing one) used to bootstrap, makes a standalone auto-image working directory and config.yaml
+Fallback for a standalone calibrated `.ms` (or parent directory containing one) when there is no CB work directory to reuse; bootstraps a separate `AUTO_IMAGE.*` working directory and config.
 
 `--auto-image-source-name`
 Source name to write into auto-image-VLA/config.yaml, overwrites metadata-scraper
@@ -390,4 +390,4 @@ Do not submit self-calibration jobs after CASA prep completes. By default, the s
 Dry-run the ASC workflow without executing CASA or submission, outputs will instead will be printed
 
 `--asc-ms-path`
-Path to a local .ms directory or parent directory containing one (ASC mode, and optional bootstrap input for auto-image mode)
+Path to a local `.ms` directory or parent containing one for ASC mode. For auto-image, prefer `--auto-image-workdir` for a CB run; `--auto-image-ms-path` is the explicit standalone-workdir fallback (`--asc-ms-path` is also accepted there).
